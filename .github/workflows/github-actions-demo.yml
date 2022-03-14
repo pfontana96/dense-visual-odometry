@@ -4,7 +4,7 @@ jobs:
   Quality:
     runs-on: ubuntu-20.04
     steps:
-      - run: apt-get install python3-pip
+      - run: sudo apt-get install python3-pip
       - run: python3 -m pip install --no-cache-dir --upgrade pip
       - run: python3 -m pip install flake8
       - run: python3 -m flake8
