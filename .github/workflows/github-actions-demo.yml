@@ -9,32 +9,43 @@ jobs:
   Quality:
     runs-on: ubuntu-20.04
     steps:
-      - run: sudo apt-get install python3-pip
-      - run: python3 -m pip install --no-cache-dir --upgrade pip
-      - run: python3 -m pip install flake8
-      - run: python3 -m flake8
-
-  Build:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Set up Docker buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v1
-
-      - name: Login to DockerHub
-        uses: docker/login-action@v1
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
         with:
-          - username: ${{ secrets.DOCKERHUB_USERNAME }}
-          - password: ${{ secrets.DOCKERHUB_TOKEN }}
+          python_version: 3.9.x
+      - run: python -m flake8
+      # - run: sudo apt-get install python3-pip
+      # - run: python3 -m pip install --no-cache-dir --upgrade pip
+      # - run: python3 -m pip install flake8
+      # - run: python3 -m flake8
 
-      - name: Build image and push it to DockerHub
-        uses: docker/build-push-action@v2
-          # relative path to the place where source code with Dockerfile is located
-          context: '.'
-          # Note: tags has to be all lower-case
-          tags: ${{ envs.IMAGE_NAME }}:${{ github.ref_name }} 
-          # build on feature branches, push only on main branch
-          push: ${{ github.ref_name == 'main' }}
+  # Tests:
+  #   runs-on: ubuntu-20.04
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions/setup-python@v2
 
-      - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
+  # BuildAndDeploy:
+  #   runs-on: ubuntu-20.04
+  #   steps:
+  #     - name: Set up Docker buildx
+  #       id: buildx
+  #       uses: docker/setup-buildx-action@v1
+
+  #     - name: Login to DockerHub
+  #       uses: docker/login-action@v1
+  #       with:
+  #         - username: ${{ secrets.DOCKERHUB_USERNAME }}
+  #         - password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  #     - name: Build image and push it to DockerHub
+  #       uses: docker/build-push-action@v2
+  #         # relative path to the place where source code with Dockerfile is located
+  #         context: '.'
+  #         # Note: tags has to be all lower-case
+  #         tags: ${{ envs.IMAGE_NAME }}:${{ github.ref_name }} 
+  #         # build on feature branches, push only on main branch
+  #         push: ${{ github.ref_name == 'main' }}
+
+  #     - name: Image digest
+  #       run: echo ${{ steps.docker_build.outputs.digest }}
