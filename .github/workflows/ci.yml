@@ -55,7 +55,7 @@ jobs:
           context: '.'
           file: ./Dockerfile
           # Note: tags has to be all lower-case
-          tags: ${{ envs.IMAGE_NAME }}:${{ github.ref_name }} 
+          tags: ${{ env.IMAGE_NAME }}:${{ github.ref_name }} 
           # build on feature branches, push only on main branch
           push: true
 
