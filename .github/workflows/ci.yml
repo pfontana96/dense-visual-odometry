@@ -65,7 +65,7 @@ jobs:
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
       - name: Install test dependencies
-        run: pip install pytest
+        run: pip install pytest pytest-cov
       
       - name: Run tests
-        run: python -m pytest tests
+        run: python -m pytest --cov=src/ --cov-branch -vvv --cov-report term-missing --color=yes -s .
