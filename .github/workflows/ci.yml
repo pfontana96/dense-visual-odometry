@@ -58,7 +58,7 @@ jobs:
       using: docker
       image: Dockerfile
     steps:
-     - name: Installs test dependencies
+      - name: Installs test dependencies
         run: pip install pytest
-    - name: Runs tests
-      run: python -m pytest tests/
+      - name: Runs tests
+        run: python -m pytest tests/
