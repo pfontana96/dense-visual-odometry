@@ -38,7 +38,7 @@ jobs:
         with:
           context: '.'
           file: ./Dockerfile
-          tags: $IMAGE_NAME:$IMAGE_TAG
+          tags: ${{IMAGE_NAME}}:${{IMAGE_TAG}}
           push: true
 
       - name: Image digest
@@ -46,7 +46,7 @@ jobs:
 
   Test:
     runs-on: Ubuntu-20.04
-    container: docker://$DOCKERHUB_USERNAME/$IMAGE_NAME:$IMAGE_TAG
+    container: docker://${{DOCKERHUB_USERNAME}}/${{IMAGE_NAME}}:${{IMAGE_TAG}}
     steps:
       - name: Installs test dependencies
         run: pip install pytest
