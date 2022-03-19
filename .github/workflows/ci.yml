@@ -68,4 +68,10 @@ jobs:
         run: pip install pytest pytest-cov
       
       - name: Run tests
-        run: python -m pytest --cov=src/ --cov-branch -vvv --cov-report term-missing --color=yes -s .
+        run: python -m pytest --cov=src/ --cov-report xml
+
+      - name: Coveralls
+        uses: coverallsapp/github-action@master
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: coverage.xml
