@@ -64,6 +64,8 @@ jobs:
       - name: Build Image
         run: docker -t $IMAGE_NAME:$IMAGE_TAG .
 
-      - name: Run tests
+      - name: Install test dependencies
         run: pip install pytest
+      
+      - name: Run tests
         run: python -m pytest tests
