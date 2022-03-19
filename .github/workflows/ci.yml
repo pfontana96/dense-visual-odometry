@@ -2,11 +2,6 @@ name: CI
 
 on: [push]
 
-env:
-  IMAGE_NAME: ${{ github.repository }}
-  IMAGE_TAG: ${{ github.ref_name }}
-  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-
 jobs:
   Quality:
     runs-on: ubuntu-20.04
@@ -54,11 +49,21 @@ jobs:
       #   run: python -m pytest tests/
 
   Test:
-    runs:
-      using: docker
-      image: Dockerfile
+    runs-on: Ubuntu-20.04
+
+    env:
+      IMAGE_NAME: ${{ github.repository }}
+      IMAGE_TAG: ${{ github.ref_name }}
+      # DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+      # DOCKER_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
     steps:
-      - name: Installs test dependencies
+      - name: Checkout code
+        uses: actions/checkout@v2
+      
+      - name: Build Image
+        run: docker -t $IMAGE_NAME:$IMAGE_TAG .
+
+      - name: Run tests
         run: pip install pytest
-      - name: Runs tests
-        run: python -m pytest tests/
+        run: python -m pytest tests
