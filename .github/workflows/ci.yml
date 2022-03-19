@@ -68,7 +68,7 @@ jobs:
         run: pip install pytest pytest-cov
       
       - name: Run tests
-        run: python -m pytest --cov=src/ --cov-report xml
+        run: python -m pytest --cov=src/ --cov-report term-missing --cov-report xml:coverage.xml --color=yes -s .
 
       - name: Coveralls
         uses: coverallsapp/github-action@master
