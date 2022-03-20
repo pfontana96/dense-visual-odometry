@@ -35,6 +35,8 @@ jobs:
           tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           push: false
           load: true
+          secrets: |
+            COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
 
       - name: See locally available images
         run: docker images
@@ -50,9 +52,7 @@ jobs:
           run: |
             python -m pip install pytest pytest-cov coveralls==3.0.1
             python -m pytest --cov=src/ --cov-report term-missing --color=yes -s .
-            coveralls --service=github
-        env:
-          COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}              
+            coveralls --service=github             
 
   # Test:
   #   needs:
