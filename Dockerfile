@@ -1,5 +1,7 @@
 FROM python:3.9-slim-buster
 
+RUN apt-get update; apt-get upgrade -y; apt-get install git -y
+
 WORKDIR dense-visual-odometry
 
 COPY src src
