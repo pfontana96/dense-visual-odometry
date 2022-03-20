@@ -31,6 +31,24 @@ class TestSO3(TestCase):
 
         np.testing.assert_almost_equal(phi_hat, expected_phi_hat, decimal=6)
 
+    def test__given_wrong_type__when_hat__then_raises_assertion(self):
+
+        # Given
+        xi = [1, 2, 3, 4, 5, 6]
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SO3.hat(xi)
+
+    def test__given_wrong_shape__when_hat__then_raises_assertion(self):
+
+        # Given
+        xi = np.array([1, 2, 3, 4, 5, 6])
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SO3.hat(xi)
+
     def test__given_phi__when_exp__then_ok(self):
 
         # Given
@@ -62,6 +80,24 @@ class TestSO3(TestCase):
 
         np.testing.assert_almost_equal(rot_mat, expected_rot_mat, decimal=6)
 
+    def test__given_wrong_type__when_exp__then_raises_assertion(self):
+
+        # Given
+        xi = [1, 2, 3, 4, 5, 6]
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SO3.exp(xi)
+
+    def test__given_wrong_shape__when_exp__then_raises_assertion(self):
+
+        # Given
+        xi = np.array([1, 2, 3, 4, 5, 6])
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SO3.exp(xi)
+
     def test__given_rot_mat__when_log__then_ok(self):
 
         # Given
@@ -92,3 +128,21 @@ class TestSO3(TestCase):
         expected_phi = np.zeros((3, 1), dtype=np.float32)
 
         np.testing.assert_almost_equal(phi, expected_phi, decimal=6)
+
+    def test__given_wrong_type__when_log__then_raises_assertion(self):
+
+        # Given
+        xi = [1, 2, 3, 4, 5, 6]
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SO3.log(xi)
+
+    def test__given_wrong_shape__when_log__then_raises_assertion(self):
+
+        # Given
+        xi = np.array([1, 2, 3, 4, 5, 6])
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SO3.log(xi)

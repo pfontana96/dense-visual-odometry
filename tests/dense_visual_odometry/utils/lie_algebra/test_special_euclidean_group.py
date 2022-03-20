@@ -32,6 +32,63 @@ class TestSE3(TestCase):
 
         np.testing.assert_almost_equal(xi_hat, expected_xi_hat, decimal=6)
 
+    def test__given_wrong_type__when_hat__then_raises_assertion(self):
+
+        # Given
+        xi = [1, 2, 3, 4, 5, 6]
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SE3.hat(xi)
+
+    def test__given_wrong_shape__when_hat__then_raises_assertion(self):
+
+        # Given
+        xi = np.array([1, 2, 3, 4, 5, 6])
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SE3.hat(xi)
+
+    def test__given_xi__when_curly_hat__then_ok(self):
+
+        # Given
+        xi = np.array([1, 2, 3, 4, 5, 6], dtype=np.float32).reshape(6, 1)
+
+        # When
+        xi_curly_hat = SE3.curly_hat(xi)
+
+        # Then
+        expected_xi_curly_hat = np.array(
+            [[0.0, -6., 5.0, 0.0, -3., 2.0],
+             [6.0, 0.0, -4., 3.0, 0.0, -1.],
+             [-5., 4.0, 0.0, -2., 1.0, 0.0],
+             [0.0, 0.0, 0.0, 0.0, -6., 5.0],
+             [0.0, 0.0, 0.0, 6.0, 0.0, -4.],
+             [0.0, 0.0, 0.0, -5., 4.0, 0.0]],
+            dtype=np.float32
+        )
+
+        np.testing.assert_almost_equal(xi_curly_hat, expected_xi_curly_hat, decimal=6)
+
+    def test__given_wrong_type__when_curly_hat__then_raises_assertion(self):
+
+        # Given
+        xi = [1, 2, 3, 4, 5, 6]
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SE3.curly_hat(xi)
+
+    def test__given_wrong_shape__when_curly_hat__then_raises_assertion(self):
+
+        # Given
+        xi = np.array([1, 2, 3, 4, 5, 6])
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SE3.curly_hat(xi)
+
     def test__given_xi__when_exp__then_ok(self):
 
         # Given
@@ -64,6 +121,24 @@ class TestSE3(TestCase):
 
         np.testing.assert_almost_equal(T, expected_T, decimal=6)
 
+    def test__given_wrong_type__when_exp__then_raises_assertion(self):
+
+        # Given
+        xi = [1, 2, 3, 4, 5, 6]
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SE3.exp(xi)
+
+    def test__given_wrong_shape__when_exp__then_raises_assertion(self):
+
+        # Given
+        xi = np.array([1, 2, 3, 4, 5, 6])
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SE3.exp(xi)
+
     def test__given_T__when_log__then_ok(self):
 
         # Given
@@ -95,3 +170,21 @@ class TestSE3(TestCase):
         expected_xi = np.zeros((6, 1), dtype=np.float32)
 
         np.testing.assert_almost_equal(xi, expected_xi, decimal=6)
+
+    def test__given_wrong_type__when_log__then_raises_assertion(self):
+
+        # Given
+        xi = [1, 2, 3, 4, 5, 6]
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SE3.log(xi)
+
+    def test__given_wrong_shape__when_log__then_raises_assertion(self):
+
+        # Given
+        xi = np.array([1, 2, 3, 4, 5, 6])
+
+        # When and Then
+        with self.assertRaises(AssertionError):
+            _ = SE3.log(xi)
