@@ -36,7 +36,7 @@ jobs:
           push: false
           load: true
           build-args:
-            COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+            - COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
 
       - name: See locally available images
         run: docker images
