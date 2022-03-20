@@ -27,11 +27,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v1
-        with:
-          username: ${{ env.DOCKER_USER }}
-          password: ${{ env.DOCKER_TOKEN }}
+      # - name: Login to DockerHub
+      #   uses: docker/login-action@v1
+      #   with:
+      #     username: ${{ env.DOCKER_USER }}
+      #     password: ${{ env.DOCKER_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
@@ -42,30 +42,42 @@ jobs:
           context: '.'
           file: ./Dockerfile
           tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          push: true
+          push: false
 
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
 
-  Test:
-    needs:
-      - BuildAndPublishImage
-    runs-on: Ubuntu-20.04
-    container: 
-      image: docker://${{ env.DOCKER_USER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-    steps:
-      - name: Installs test dependencies
-        run: pip install pytest
-
-      - name: Runs tests
-        run: python -m pytest --cov=src/ --cov-report term-missing --color=yes -s .
-
-      - name: Upload data to Coveralls
-        run: |
-          python -m pip install coveralls==3.0.1
-          coveralls --service=github
+      - name: Run tests on Docker container
+        uses: addnab/docker-run-action@v3
+          with:
+            image: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            run: |
+              python -m pip install pytest pytest-cov coveralls==3.0.1
+              python -m pytest --cov=src/ --cov-report term-missing --color=yes -s .
+              coveralls --service=github
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}              
+
+  # Test:
+  #   needs:
+  #     - BuildAndPublishImage
+  #   runs-on: Ubuntu-20.04
+  #   container: 
+  #     image: docker://${{ env.DOCKER_USER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+  #   steps:
+  #     - name: Installs test dependencies
+  #       run: pip install pytest
+
+  #     - name: Runs tests
+  #       run: python -m pytest --cov=src/ --cov-report term-missing --color=yes -s .
+
+  #     - name: Upload data to Coveralls
+  #       run: |
+  #         python -m pip install coveralls==3.0.1
+  #         coveralls --service=github
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   # Test:
   #   runs-on: Ubuntu-20.04
