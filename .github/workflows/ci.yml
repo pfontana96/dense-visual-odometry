@@ -5,8 +5,9 @@ on: [push]
 env:
   IMAGE_NAME: ${{ github.event.repository.name }}
   IMAGE_TAG: ${{ github.ref_name }}
-  DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-  DOCKER_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  # DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+  # DOCKER_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   Quality:
@@ -34,9 +35,7 @@ jobs:
           file: ./Dockerfile
           tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           push: false
-          load: true
-          build-args: |
-            COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+          load: true           
 
       - name: See locally available images
         run: docker images
