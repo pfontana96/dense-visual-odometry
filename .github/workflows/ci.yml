@@ -48,7 +48,7 @@ jobs:
       #     coveralls --service=github"
 
       - name: Run tests on Docker container
-      - uses: addnab/docker-run-action@v3
+        uses: addnab/docker-run-action@v3
         with:
           image: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           run: |
