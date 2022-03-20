@@ -4,9 +4,7 @@ RUN apt-get update; apt-get upgrade -y; apt-get install git -y
 
 WORKDIR dense-visual-odometry
 
-COPY src src
-COPY tests tests
-COPY requirements.txt requirements.txt
+COPY . .
 
 RUN python -m pip install --no-cache-dir --upgrade pip
 RUN pip install -r requirements.txt --no-cache-dir
