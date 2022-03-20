@@ -64,6 +64,9 @@ jobs:
       - name: Build Image
         run: docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
+      - name: Run Docker container
+        run: docker run -it $IMAGE_NAME:$IMAGE_TAG
+
       - name: Install test dependencies
         run: pip install pytest pytest-cov
       
