@@ -1,2 +1,2 @@
 numpy == 1.22.*
-python3-opencv == 4.5.*
+opencv-python == 4.5.*
