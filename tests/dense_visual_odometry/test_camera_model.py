@@ -145,6 +145,33 @@ class TestRGBDCameraModel(TestCase):
         )
         np.testing.assert_equal(pointcloud, expected_pointcloud)
 
+    def test__depth_given_image_with_invalid_pixels_and_return_mask__when_deproject__then_ok(self):
+        # Given
+        height, width = (10, 10)
+        depth_image = np.ones((10, 10), dtype=np.float32)
+        depth_image[:5] = 2.0
+        depth_image[5:, :2] = 3.0
+        depth_image[0, 0] = 0.0
+        depth_image[0, 1] = 0.0
+        depth_scale = 0.5
+
+        camera_model = RGBDCameraModel(calibration_matrix=np.eye(3, dtype=np.float32), depth_scale=depth_scale)
+
+        # When
+        pointcloud, mask = camera_model.deproject(depth_image, np.zeros((6, 1), dtype=np.float32), return_mask=True)
+
+        # Then
+        expected_mask = (depth_image != 0.0)
+        x, y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
+        x = x[expected_mask]
+        y = y[expected_mask]
+        expected_pointcloud = np.vstack(
+            (x.reshape(1, -1), y.reshape(1, -1), depth_image[expected_mask].reshape(1, -1) * depth_scale,
+             np.ones_like(x).reshape(1, -1))
+        )
+        np.testing.assert_equal(pointcloud, expected_pointcloud)
+        np.testing.assert_equal(mask, expected_mask)
+
     def test__given_a_known_pointcloud__when_project__then_ok(self):
 
         # Given

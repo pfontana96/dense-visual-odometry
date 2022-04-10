@@ -113,7 +113,7 @@ class RGBDCameraModel:
 
         return cls(camera_matrix, depth_scale, distorssion_coefficients, distorssion_model)
 
-    def deproject(self, depth_image: np.ndarray, camera_pose: np.ndarray):
+    def deproject(self, depth_image: np.ndarray, camera_pose: np.ndarray, return_mask: bool = False):
         """
             Deprojects a depth image into the World reference frame
 
@@ -123,32 +123,39 @@ class RGBDCameraModel:
             Depth image (with invalid pixels defined with the value 0)
         camera_pose : np.ndarray
             Camera pose w.r.t World coordinate frame expressed as a 6x1 se(3) vector
+        return_mask : bool
+            if True, then a bolean mask is returned with valid pixels
 
         Returns
         -------
         pointcloud : np.ndarray
             3D Point (4xN) coordinates of projected points in Homogeneous coordinates (i.e x, y, z, 1)
+        mask : np.ndarray, optional
+            Boolean mask with the same shape as `depth_image` with True on valid pixels and false on non valid.
         """
         height, width = depth_image.shape
 
         z = depth_image.reshape(-1) * self.depth_scale
 
         # Remove invalid points
-        mask = z == 0
-        z = z[~mask]
+        mask = z != 0.0
+        z = z[mask]
 
         # Create pixel grid
         # TODO: Use a more efficient way of creating pointcloud -> Several pixels values are repeated. See `sparse`
         # parameter of `np.meshgrid`
         x_pixel, y_pixel = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
-        x_pixel = x_pixel.reshape(-1)[~mask]
-        y_pixel = y_pixel.reshape(-1)[~mask]
+        x_pixel = x_pixel.reshape(-1)[mask]
+        y_pixel = y_pixel.reshape(-1)[mask]
 
         # Map from pixel position to 3d coordinates using camera matrix
         T = SE3.exp(camera_pose)
         camera_matrix = np.dot(self.calibration_matrix, T)
 
         pointcloud = np.dot(np.linalg.inv(camera_matrix), np.vstack((x_pixel, y_pixel, z, np.ones_like(z))))
+
+        if return_mask:
+            return (pointcloud, mask.reshape(height, width))
 
         return pointcloud
 
