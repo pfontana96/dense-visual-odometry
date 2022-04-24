@@ -25,3 +25,17 @@ class TestInterp2D(TestCase):
 
         # Then
         np.testing.assert_equal(result, np.array([11.0, 22.0, 27.5, 33.0]))
+
+    def test__given_meshgrid_for_an_image__when_interpolate__then_same_image(self):
+
+        # Given
+        height, width = self.image.shape
+        x, y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
+
+        # When
+        result = Interp2D.bilinear(x, y, self.image)
+
+        # Then
+        # NOTE: By the current implementation (17/04/2022) of 'Interp2D.bilinear' if we give the exact grid to retrieve
+        # the same image, then last row and last column will be 0.0
+        np.testing.assert_equal(result[:-1, :-1], self.image[:-1, :-1])
