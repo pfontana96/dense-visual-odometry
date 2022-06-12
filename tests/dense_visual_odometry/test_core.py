@@ -1,5 +1,4 @@
 from unittest import TestCase
-from unittest.mock import patch
 
 import numpy as np
 
@@ -24,7 +23,7 @@ class TestDVO(TestCase):
         camera_model = RGBDCameraModel(calib_matrix, depth_scale)
 
         gray_image = np.zeros((5, 5), dtype=np.float32)
-        
+
         depth_image = np.ones_like(gray_image)
         depth_image[1, 1] = 0.0  # Adds invalid depth pixel
 
@@ -46,7 +45,7 @@ class TestDVO(TestCase):
         camera_model = RGBDCameraModel(calib_matrix, depth_scale)
 
         gray_image = np.zeros((5, 5), dtype=np.float32)
-        
+
         depth_image = np.ones_like(gray_image)
         depth_image[1, 1] = 0.0  # Adds invalid depth pixel
 
@@ -71,7 +70,7 @@ class TestDVO(TestCase):
         intensity_value = 150
         gray_image = np.full(shape=(height, width), fill_value=intensity_value, dtype=np.uint8)
         gray_image[:int(height / 2), :int(width / 2)] = intensity_value / 3.0
-        
+
         depth_image = np.ones_like(gray_image)
         depth_image[:int(height / 2), :int(width / 2)] = 3.0
 

@@ -25,6 +25,9 @@ class Interp2D:
         values : np.ndarray
             Interpolated values for the coordinates specified by `x` and `y` from `image`
         """
+        # NOTE: By the current implementation (17/04/2022) of 'Interp2D.bilinear' if we give the exact grid to retrieve
+        # the same image, then last row and last column will be 0.0
+
         assert len(x) == len(y), "'x' and 'y' should have the same length"
 
         height, width = image.shape
