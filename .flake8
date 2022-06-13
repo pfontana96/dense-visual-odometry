@@ -1,3 +1,4 @@
 [flake8]
 max-line-length=120
 exclude=venv, __pycache__, data, .git
+extend-ignore=W605
