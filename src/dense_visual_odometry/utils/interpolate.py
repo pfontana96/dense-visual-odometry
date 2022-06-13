@@ -43,10 +43,10 @@ class Interp2D:
         y0 = np.clip(y0, 0, height - 1)
         y1 = np.clip(y1, 0, height - 1)
 
-        Ia = image[y0, x0].astype(np.float32)
-        Ib = image[y1, x0].astype(np.float32)
-        Ic = image[y0, x1].astype(np.float32)
-        Id = image[y1, x1].astype(np.float32)
+        Ia = image[y0, x0].astype(np.float16)
+        Ib = image[y1, x0].astype(np.float16)
+        Ic = image[y0, x1].astype(np.float16)
+        Id = image[y1, x1].astype(np.float16)
 
         wa = (x1 - x) * (y1 - y)
         wb = (x1 - x) * (y - y0)

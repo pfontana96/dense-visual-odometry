@@ -29,8 +29,8 @@ class TestDVO(TestCase):
 
         # When
         dvo = DenseVisualOdometry(camera_model, np.zeros((6, 1), dtype=np.float32))
-        residuals = dvo.compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32),
-                                          keep_dims=False, return_mask=True)  # return_mask should be ignored
+        residuals = dvo._compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32),
+                                           keep_dims=False, return_mask=True)  # return_mask should be ignored
 
         # Then
         self.assertIsInstance(residuals, np.ndarray)
@@ -51,8 +51,8 @@ class TestDVO(TestCase):
 
         # When
         dvo = DenseVisualOdometry(camera_model, np.zeros((6, 1), dtype=np.float32))
-        result = dvo.compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32),
-                                       keep_dims=True, return_mask=True)  # return_mask should NOT be ignored
+        result = dvo._compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32),
+                                        keep_dims=True, return_mask=True)  # return_mask should NOT be ignored
 
         # Then
         self.assertIsInstance(result, tuple)
@@ -76,7 +76,7 @@ class TestDVO(TestCase):
 
         # When
         dvo = DenseVisualOdometry(camera_model, np.zeros((6, 1), dtype=np.float32))
-        residuals = dvo.compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32))
+        residuals = dvo._compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32))
 
         # Then
         # NOTE: By the current implementation (17/04/2022) of 'Interp2D.bilinear' if we give the exact grid to retrieve

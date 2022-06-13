@@ -5,6 +5,7 @@ import yaml
 from typing import Union
 
 from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
+from dense_visual_odometry.utils.numpy_cache import np_cache
 
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ class RGBDCameraModel:
 
         return cls(camera_matrix, depth_scale, distorssion_coefficients, distorssion_model)
 
+    @np_cache
     def deproject(self, depth_image: np.ndarray, camera_pose: np.ndarray, return_mask: bool = False):
         """
             Deprojects a depth image into the World reference frame
