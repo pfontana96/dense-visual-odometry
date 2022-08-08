@@ -106,6 +106,7 @@ class TestImagePyramid(TestCase):
         np.testing.assert_equal(result, cv2.pyrDown(cv2.pyrDown(self.image)))
         self.assertEqual(self._caplog.records, [])  # No errors logged
 
+
 class TestCoarseToFineMultiImagePyramid(TestCase):
 
     def setUp(self) -> None:

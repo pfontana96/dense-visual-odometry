@@ -40,7 +40,6 @@ class ImagePyramid:
         image : np.ndarray
             Image corresponding to 'level'
         """
-        assertion_message = f"'level' should be in the range [0, {self.levels - 1}], got {level} instead"
         if (level >= self.levels) or (level < 0):
             raise IndexError("Expected 'level' to be in the range [0, {}], got {} instead".format(
                 self.levels - 1, level
@@ -50,7 +49,7 @@ class ImagePyramid:
 
 
 class MultiImagePyramid:
-    
+
     def __init__(self, images: list, levels: int):
         self._levels = levels
         self._nb_of_images = len(images)
@@ -82,4 +81,4 @@ class CoarseToFineMultiImagePyramid(MultiImagePyramid):
         result = (pyramid[self._counter] for pyramid in self.pyramids)
         self._counter -= 1
 
-        return result        
+        return result

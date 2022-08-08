@@ -3,6 +3,7 @@ import logging
 import numpy as np
 import cv2
 
+from dense_visual_odometry.utils.image_pyramid import CoarseToFineMultiImagePyramid
 from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
 from dense_visual_odometry.utils.interpolate import Interp2D
 from dense_visual_odometry.utils.jacobian import compute_jacobian_of_warp_function, compute_gradients
@@ -265,10 +266,18 @@ class DenseVisualOdometry:
             transformation = np.zeros((6, 1), dtype=np.float32)
 
         else:
-            transformation = self._find_optimal_transformation(
-                gray_image=gray_image, gray_image_prev=self.gray_image_prev, depth_image_prev=self.depth_image_prev,
-                init_guess=init_guess
+            # Create coarse to fine Image Pyramids
+            image_pyramids = CoarseToFineMultiImagePyramid(
+                images = [gray_image, self.gray_image_prev, self.depth_image_prev],
+                levels = self.levels
             )
+
+            for i, (gray_image, gray_image_prev, depth_image_prev) in enumerate(image_pyramids):
+                logger.debug("Pyramid level: {}".format(i))
+                transformation = self._find_optimal_transformation(
+                    gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
+                    init_guess=init_guess
+                )
 
         # Update
         self.current_pose = SE3.log(np.dot(SE3.exp(transformation), SE3.exp(self.current_pose)))
