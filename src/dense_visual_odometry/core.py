@@ -300,8 +300,8 @@ class DenseVisualOdometry:
         else:
             # Create coarse to fine Image Pyramids
             image_pyramids = CoarseToFineMultiImagePyramid(
-                images = [gray_image, self.gray_image_prev, self.depth_image_prev],
-                levels = self.levels
+                images=[gray_image, self.gray_image_prev, self.depth_image_prev],
+                levels=self.levels
             )
 
             for gray_image, gray_image_prev, depth_image_prev in image_pyramids:
