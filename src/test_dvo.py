@@ -20,16 +20,16 @@ def main():
     set_root_logger(verbose=True)
 
     if USE_TEST_DATA:
-        camera_model_config = Path(__file__).resolve().parent.parent / "tests" / "test_data" / "test_camera_intrinsics.yaml"
+        camera_config = Path(__file__).resolve().parent.parent / "tests" / "test_data" / "test_camera_intrinsics.yaml"
         depth_images_path = Path(__file__).resolve().parent.parent / "tests" / "test_data" / "depth"
         rgb_images_path = Path(__file__).resolve().parent.parent / "tests" / "test_data" / "rgb"
-    
+
     else:
-        camera_model_config = Path(__file__).resolve().parent.parent / "data" / "camera_intrinsics.yaml"
+        camera_config = Path(__file__).resolve().parent.parent / "data" / "camera_intrinsics.yaml"
         depth_images_path = Path(__file__).resolve().parent.parent / "data" / "depth"
         rgb_images_path = Path(__file__).resolve().parent.parent / "data" / "rgb"
 
-    camera_model = RGBDCameraModel.load_from_yaml(camera_model_config)
+    camera_model = RGBDCameraModel.load_from_yaml(camera_config)
 
     init_pose = np.array([[0.0], [0.0], [0.16], [-1.33658619],  [1.33658135], [-1.12156232]], dtype=np.float32)
 
