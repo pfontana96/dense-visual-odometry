@@ -135,11 +135,11 @@ def main():
         x, y, z, u, v, w = tf.get_quiver_data()
         Q = ax.quiver(
             x, y, z, u, v, w,
-            colors=["red", "red", "red", "green", "green", "green", "blue", "blue", "blue"],
+            colors=["red", "green", "blue"],
             length=0.5, normalize=True
         )
 
-        nb_frames = 50
+        nb_frames = len(transformations)
 
         anim = animation.FuncAnimation(  # noqa: F841
             fig, animate_func, nb_frames, fargs=(tf, Q, transformations), interval=200, blit=False, repeat=False
