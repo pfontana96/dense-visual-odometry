@@ -133,3 +133,27 @@ class SE3(BaseSpecialGroup):
             xi[:3, 0] = np.dot(V_inv, T[:3, 3]).reshape(-1)
 
         return xi
+
+    @staticmethod
+    def inverse(T: np.ndarray):
+        """
+            Returns the inverse of a transformation matrix (4x4)
+
+        Parameters
+        ----------
+        T : np.ndarray:
+            4x4 Transformation matrix
+
+        Returns
+        -------
+        T : np.ndarray
+            4x4 Transformation matrix
+        """
+        assert type(T) == np.ndarray, "'T' should be a numpy array"
+        assert T.shape == (4, 4), "Expected shape (4,4) for 'T', got {} instead".format(T.shape)
+
+        T_inverse = np.eye(4, 4, dtype=np.float32)
+        T_inverse[:3, :3] = T[:3, :3].T
+        T_inverse[:3, 3] = -np.dot(T[:3, :3].T, T[:3, 3])
+
+        return T_inverse

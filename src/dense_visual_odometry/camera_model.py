@@ -11,6 +11,7 @@ from dense_visual_odometry.utils.numpy_cache import np_cache
 logger = logging.getLogger(__name__)
 
 
+# TODO: Support distorssion coefficients
 class RGBDCameraModel:
     """
         Class that models a camera using the pinhole model
@@ -48,8 +49,8 @@ class RGBDCameraModel:
         assertion_message = "Expected `scale` to be a positive floating point, got `{:.3f}` instead".format(depth_scale)
         assert depth_scale >= 0.0, assertion_message
 
-        # Store calibration matrix as a full rank 4x4 matrix
-        self.calibration_matrix = np.eye(4, dtype=np.float32)
+        # Store calibration matrix as a 3x4 matrix
+        self.calibration_matrix = np.zeros((3, 4), dtype=np.float32)
         self.calibration_matrix[:3, :3] = calibration_matrix
         self.depth_scale = depth_scale
 
@@ -150,17 +151,21 @@ class RGBDCameraModel:
         x_pixel = x_pixel.reshape(-1)[mask]
         y_pixel = y_pixel.reshape(-1)[mask]
 
-        # Map from pixel position to 3d coordinates using camera matrix
-        T = SE3.exp(camera_pose)
-        camera_matrix = np.dot(self.calibration_matrix, T)
+        # Map from pixel position to 3d coordinates using camera matrix (inverted)
+        # Get x, y points w.r.t camera reference frame (still not multiply by the depth)
+        points = np.dot(np.linalg.inv(self.calibration_matrix[:3, :3]), np.vstack((x_pixel, y_pixel, np.ones_like(z))))
 
-        pointcloud = np.dot(np.linalg.inv(camera_matrix), np.vstack((x_pixel, y_pixel, z, np.ones_like(z))))
+        pointcloud = np.vstack((points[0, :] * z, points[1, :] * z, z, np.ones_like(z)))
+
+        # Convert from camera reference frame to world reference frame
+        pointcloud = np.dot(SE3.exp(camera_pose), pointcloud)
 
         if return_mask:
             return (pointcloud, mask.reshape(height, width))
 
         return pointcloud
 
+    @np_cache
     def project(self, pointcloud: np.ndarray, camera_pose: np.ndarray):
         """
             Projects given pointcloud to image plane
@@ -171,14 +176,17 @@ class RGBDCameraModel:
             3D Point (4xN) coordinates of projected points in Homogeneous coordinates (i.e x, y, z, 1) w.r.t the World
             coordinate frame
         camera_pose : np.ndarray
-            Camera pose w.r.t World coordinate frame expressed as a 6x1 se(3) vector
+            Camera pose w.r.t World reference frame expressed as a 6x1 se(3) vector
 
         Returns
         -------
         points_pixel : np.ndarray
-            Image plane (3xN) coordinates given in homogeneous coordinates (i.e u, v, 1) in pixels. Note that
+            Image plane (3xN) coordinates given in homogeneous coordinates (i.e [u, v, 1]) in pixels. Note that
             values might not be integer and might lie between physical pixels, user must then decide what to do
             with those
         """
-        camera_matrix = np.dot(self.calibration_matrix[:3], SE3.exp(camera_pose))
-        return np.dot(camera_matrix, pointcloud)
+        camera_matrix = np.dot(self.calibration_matrix, SE3.inverse(SE3.exp(camera_pose)))
+        points_pixels = np.dot(camera_matrix, pointcloud)
+        points_pixels /= points_pixels[2, :] / self.depth_scale
+
+        return points_pixels

@@ -3,7 +3,7 @@ import cv2
 import logging
 import pytest
 
-from dense_visual_odometry.utils.image_pyramid import ImagePyramid, ImagePyramidError
+from dense_visual_odometry.utils.image_pyramid import ImagePyramid, ImagePyramidError, CoarseToFineMultiImagePyramid
 
 from unittest import TestCase
 from unittest.mock import patch
@@ -38,7 +38,7 @@ class TestImagePyramid(TestCase):
         self.assertEqual(pyrdown_mock.call_count, nb_levels - 1)
         self.assertEqual(len(pyramid.pyramid), nb_levels)
         for level in range(nb_levels):
-            self.assertIsNotNone(pyramid.get(level))
+            self.assertIsNotNone(pyramid[level])
         self.assertEqual(self._caplog.records, [])  # No errors logged
 
     def test__given_a_image_and_levels__when_init__then_right_resolution(self):
@@ -52,9 +52,9 @@ class TestImagePyramid(TestCase):
 
         # Then
         self.assertEqual(len(pyramid.pyramid), nb_levels)
-        self.assertEqual(pyramid.get(0).shape, (160, 160, 3))
-        self.assertEqual(pyramid.get(1).shape, (80, 80, 3))
-        self.assertEqual(pyramid.get(2).shape, (40, 40, 3))
+        self.assertEqual(pyramid[0].shape, (160, 160, 3))
+        self.assertEqual(pyramid[1].shape, (80, 80, 3))
+        self.assertEqual(pyramid[2].shape, (40, 40, 3))
         self.assertEqual(self._caplog.records, [])  # No errors logged
 
     def test__given_wrong_type_image__when_init__then_raises_imagepyramid(self):
@@ -89,8 +89,8 @@ class TestImagePyramid(TestCase):
 
         # When and Then
         with self._caplog.at_level(logging.ERROR):
-            with self.assertRaises(AssertionError):
-                _ = pyramid.get(level)
+            with self.assertRaises(IndexError):
+                _ = pyramid[level]
 
     def test__given_a_valid_level__when_get__then_ok(self):
 
@@ -100,8 +100,43 @@ class TestImagePyramid(TestCase):
 
         # When
         with self._caplog.at_level(logging.ERROR):
-            result = pyramid.get(level)
+            result = pyramid[level]
 
         # Then
         np.testing.assert_equal(result, cv2.pyrDown(cv2.pyrDown(self.image)))
         self.assertEqual(self._caplog.records, [])  # No errors logged
+
+
+class TestCoarseToFineMultiImagePyramid(TestCase):
+
+    def setUp(self) -> None:
+        self.maxDiff = None
+
+        rs = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(123456789)))
+        self.nb_of_images = 3
+        self.image_shape = (160, 160, 3)
+        self.images = [rs.randint(0, 255, size=self.image_shape).astype(np.uint8) for _ in range(self.nb_of_images)]
+
+    def test__given_coarsetofinepyramid__when_iter__then_ok(self):
+        # Given
+        levels = 3
+        pyramid = CoarseToFineMultiImagePyramid(images=self.images, levels=levels)
+
+        # When + Then
+        import logging
+        logger = logging.getLogger(__name__)
+        i = levels - 1
+        for image1, image2, image3 in pyramid:
+            logger.info("{} level".format(i))
+            self.assertIsInstance(image1, np.ndarray)
+            self.assertEqual(image1.shape[:2], tuple(np.array(self.image_shape[:2]) / (2 ** i)))
+
+            self.assertIsInstance(image2, np.ndarray)
+            self.assertEqual(image2.shape[:2], tuple(np.array(self.image_shape[:2]) / (2 ** i)))
+
+            self.assertIsInstance(image3, np.ndarray)
+            self.assertEqual(image3.shape[:2], tuple(np.array(self.image_shape[:2]) / (2 ** i)))
+
+            i -= 1
+
+        self.assertEqual(i, -1)

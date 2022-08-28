@@ -1,0 +1,18 @@
+# See: https://vision.in.tum.de/data/datasets/rgbd-dataset/file_formats
+calibration_matrix:
+  - - 525.0
+    - 0.0
+    - 319.5
+  - - 0.0
+    - 525.0
+    - 239.5
+  - - 0.0
+    - 0.0
+    - 1.0
+# coeffs:
+#   - 0.0
+#   - 0.0
+#   - 0.0
+#   - 0.0
+#   - 0.0
+depth_scale: 0.0002

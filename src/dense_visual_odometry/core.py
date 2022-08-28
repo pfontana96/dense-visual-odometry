@@ -1,8 +1,10 @@
 import logging
+from typing import OrderedDict
 
 import numpy as np
 import cv2
 
+from dense_visual_odometry.utils.image_pyramid import CoarseToFineMultiImagePyramid
 from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
 from dense_visual_odometry.utils.interpolate import Interp2D
 from dense_visual_odometry.utils.jacobian import compute_jacobian_of_warp_function, compute_gradients
@@ -21,7 +23,7 @@ class DenseVisualOdometry:
     ----------
     camera_model : dense_visual_odometry.camera_model.RGBDCameraModel
         Camera model used
-     initial_pose : np.ndarray
+    initial_pose : np.ndarray
             Initial camera pose w.r.t the World coordinate frame expressed as a 6x1 se(3) vector
     weighter : BaseWeighter | None, optional
         Weighter functions to apply on residuals to remove dynamic object. If None, then no weighting is applied
@@ -31,7 +33,16 @@ class DenseVisualOdometry:
         Previous frame's depth image
     """
 
-    def __init__(self, camera_model: RGBDCameraModel, initial_pose: np.ndarray, weighter: BaseWeighter = None):
+    # Class constatnts
+
+    # Step end causes
+    _ERROR_INCREASED_ON_ITERATION = 0x1
+    _MAX_ITERATIONS_EXCEEDED = 0x2
+    _SUCCESS = 0x3
+
+    def __init__(
+        self, camera_model: RGBDCameraModel, initial_pose: np.ndarray, levels: int, weighter: BaseWeighter = None
+    ):
         """
         Parameters
         ----------
@@ -39,6 +50,8 @@ class DenseVisualOdometry:
             Camera model used
         initial_pose : np.ndarray
             Initial camera pose w.r.t the World coordinate frame expressed as a 6x1 se(3) vector
+        levels : int
+            Pyramid octaves to use
         weighter : BaseWeighter | None, optional
             Weighter functions to apply on residuals to remove dynamic object. If None, then no weighting is applied
         """
@@ -52,6 +65,8 @@ class DenseVisualOdometry:
         self.depth_image_prev = None
 
         self.weighter = weighter
+
+        self.levels = levels
 
     def _compute_residuals(self, gray_image: np.ndarray, gray_image_prev: np.ndarray, depth_image_prev: np.ndarray,
                            transformation: np.ndarray, keep_dims: bool = True, return_mask: bool = False):
@@ -169,7 +184,8 @@ class DenseVisualOdometry:
 
     def _find_optimal_transformation(
         self, gray_image: np.ndarray, gray_image_prev: np.ndarray, depth_image_prev: np.ndarray,
-        init_guess: np.ndarray = np.zeros((6, 1), dtype=np.float32), max_iter: int = 100, ratio: float = 0.995
+        init_guess: np.ndarray = np.zeros((6, 1), dtype=np.float32), max_iter: int = 100, tolerance: float = 1e-6,
+        return_additional_info: bool = False, max_allowed_error_increase_steps: int = 0
     ):
         """
             Given a pair of grayscale images and the corresponding depth one for the first image on the pair, it
@@ -188,13 +204,20 @@ class DenseVisualOdometry:
             `[[0], [0], [0], [0], [0], [0]]`
         max_iter : int, optional
             Max number of iterations. Defaults to `100`
-        ratio : float, optional
-            Ratio to be used on stopping criteria (D'Alembert criterion). Defaults to `0.995`
+        tolerance : float, optional
+            Tolerance used on stopping criteria. Defaults to `0.000001`
+        return_additonal_info : bool, optional
+            If True, then a dict is also returned with information about the estimated trasnformation. Defaults to
+            False
+        max_allowed_error_increase_steps : int
+            Number of successive iterations to allow the error to increase. Defaults to `0`
 
         Returns
         -------
         xi : np.ndarray
             Estimated transformation between frames expressed as a se(3) 6x1 array.
+        info : dict, optional
+            Information about the estimated transformation.
 
         Notes
         -----
@@ -207,6 +230,12 @@ class DenseVisualOdometry:
         # Newton-Gauss method
         err_prev = np.finfo("float32").max
         xi = init_guess
+
+        additional_information = OrderedDict()
+
+        error_increased_count = 0
+        end_cause = DenseVisualOdometry._MAX_ITERATIONS_EXCEEDED
+
         for i in range(max_iter):
             # Compute residuals
             residuals, mask = self._compute_residuals(
@@ -231,23 +260,37 @@ class DenseVisualOdometry:
             # Update
             xi = SE3.log(np.dot(SE3.exp(xi), SE3.exp(delta_xi)))
 
-            # Stopping criteria (D'Alembert criterion)
-            err = np.sum(weights * residuals ** 2)
+            err = np.sum(weights * (residuals ** 2))
 
             logger.debug("Iteration {} -> error: {:.4f}".format(i, err))
 
-            if (err / err_prev) > ratio:
-                logger.debug("Found convergence at iteration '{}': xi={}".format(i, xi))
-                break
+            # Stopping criteria (as shown on paper, error function always displays a global minima)
+            if (err > err_prev):
+                error_increased_count += 1
 
-            if i == (max_iter - 1):
-                logger.warning("Could not find convergence")
+                if error_increased_count > max_allowed_error_increase_steps:
+                    end_cause = DenseVisualOdometry._ERROR_INCREASED_ON_ITERATION
+                    break
+            else:
+                error_increased_count = 0
+
+            if np.abs(err - err_prev) < tolerance:
+                end_cause = DenseVisualOdometry._SUCCESS
+                break
 
             err_prev = err
 
+        if return_additional_info:
+            additional_information.update({"end": end_cause})
+            xi = (xi, additional_information)
+
         return xi
 
-    def step(self, color_image: np.ndarray, depth_image: np.ndarray, init_guess=np.zeros((6, 1), dtype=np.float32)):
+    def step(
+        self, color_image: np.ndarray, depth_image: np.ndarray, init_guess=np.zeros((6, 1), dtype=np.float32),
+        max_iter: int = 100, tolerance: float = 1e-6, return_additional_info: bool = False,
+        max_allowed_error_increase_steps: int = 0
+    ):
         gray_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
 
         if (self.gray_image_prev is None) and (self.depth_image_prev is None):
@@ -255,10 +298,19 @@ class DenseVisualOdometry:
             transformation = np.zeros((6, 1), dtype=np.float32)
 
         else:
-            transformation = self._find_optimal_transformation(
-                gray_image=gray_image, gray_image_prev=self.gray_image_prev, depth_image_prev=self.depth_image_prev,
-                init_guess=init_guess
+            # Create coarse to fine Image Pyramids
+            image_pyramids = CoarseToFineMultiImagePyramid(
+                images=[gray_image, self.gray_image_prev, self.depth_image_prev],
+                levels=self.levels
             )
+
+            for gray_image, gray_image_prev, depth_image_prev in image_pyramids:
+                transformation = self._find_optimal_transformation(
+                    gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
+                    init_guess=init_guess, tolerance=tolerance, return_additional_info=return_additional_info,
+                    max_allowed_error_increase_steps=max_allowed_error_increase_steps, max_iter=max_iter
+                )
+                init_guess = transformation
 
         # Update
         self.current_pose = SE3.log(np.dot(SE3.exp(transformation), SE3.exp(self.current_pose)))
@@ -267,3 +319,4 @@ class DenseVisualOdometry:
 
         # Clean cache
         self.camera_model.deproject.cache_clear()
+        logger.info("DONE")
