@@ -68,17 +68,18 @@ class CoarseToFineMultiImagePyramid(MultiImagePyramid):
 
     def __init__(self, images: list, levels: int):
         super(CoarseToFineMultiImagePyramid, self).__init__(images=images, levels=levels)
-        self._counter = self.levels
+        self._count = self.levels - 1
 
     def __iter__(self):
-        self._counter = self.levels
+        self._count = self.levels - 1
         return self
 
     def __next__(self):
-        if self._counter >= self.levels:
+        if self._count < 0:
+            self._count = self.levels - 1
             raise StopIteration
 
-        result = (pyramid[self._counter] for pyramid in self.pyramids)
-        self._counter -= 1
+        result = [self._pyramids[i][self._count] for i in range(self.images_count)]
+        self._count -= 1
 
         return result

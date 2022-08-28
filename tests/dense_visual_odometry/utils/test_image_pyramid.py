@@ -123,12 +123,20 @@ class TestCoarseToFineMultiImagePyramid(TestCase):
         pyramid = CoarseToFineMultiImagePyramid(images=self.images, levels=levels)
 
         # When + Then
-        for i, (image1, image2, image3) in zip(reversed(range(levels)), pyramid):
+        import logging
+        logger = logging.getLogger(__name__)
+        i = levels - 1
+        for image1, image2, image3 in pyramid:
+            logger.info("{} level".format(i))
             self.assertIsInstance(image1, np.ndarray)
-            self.assertEqual(image1.shape, tuple(np.array(self.image_shape) / (2 ** i)))
+            self.assertEqual(image1.shape[:2], tuple(np.array(self.image_shape[:2]) / (2 ** i)))
 
             self.assertIsInstance(image2, np.ndarray)
-            self.assertEqual(image2.shape, tuple(np.array(self.image_shape) / (2 ** i)))
+            self.assertEqual(image2.shape[:2], tuple(np.array(self.image_shape[:2]) / (2 ** i)))
 
             self.assertIsInstance(image3, np.ndarray)
-            self.assertEqual(image3.shape, tuple(np.array(self.image_shape) / (2 ** i)))
+            self.assertEqual(image3.shape[:2], tuple(np.array(self.image_shape[:2]) / (2 ** i)))
+
+            i -= 1
+
+        self.assertEqual(i, -1)
