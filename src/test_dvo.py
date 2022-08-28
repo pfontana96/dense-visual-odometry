@@ -13,20 +13,29 @@ from dense_visual_odometry.log import set_root_logger
 logger = logging.getLogger(__name__)
 
 
+USE_TEST_DATA = True
+
+
 def main():
     set_root_logger(verbose=True)
 
-    camera_model_config = Path(__file__).resolve().parent.parent / "data" / "camera_intrinsics.yaml"
+    if USE_TEST_DATA:
+        camera_model_config = Path(__file__).resolve().parent.parent / "tests" / "test_data" / "test_camera_intrinsics.yaml"
+        depth_images_path = Path(__file__).resolve().parent.parent / "tests" / "test_data" / "depth"
+        rgb_images_path = Path(__file__).resolve().parent.parent / "tests" / "test_data" / "rgb"
+    
+    else:
+        camera_model_config = Path(__file__).resolve().parent.parent / "data" / "camera_intrinsics.yaml"
+        depth_images_path = Path(__file__).resolve().parent.parent / "data" / "depth"
+        rgb_images_path = Path(__file__).resolve().parent.parent / "data" / "rgb"
+
     camera_model = RGBDCameraModel.load_from_yaml(camera_model_config)
 
     init_pose = np.array([[0.0], [0.0], [0.16], [-1.33658619],  [1.33658135], [-1.12156232]], dtype=np.float32)
 
-    dvo = DenseVisualOdometry(camera_model=camera_model, initial_pose=init_pose)
+    dvo = DenseVisualOdometry(camera_model=camera_model, initial_pose=init_pose, levels=5)
 
-    depth_images_path = Path(__file__).resolve().parent.parent / "data" / "depth"
-    rgb_images_path = Path(__file__).resolve().parent.parent / "data" / "rgb"
-
-    n = 250  # Hardcoded because of available data
+    n = 10  # Hardcoded because of available data
 
     steps = []
     for i in range(n):
