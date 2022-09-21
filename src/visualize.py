@@ -31,6 +31,7 @@ def load_transformation_from_test_benchmark():
 
     return transformations
 
+
 class TF(object):
     def __init__(self, xi: np.ndarray = np.zeros((6, 1))):
         self.xi = xi
