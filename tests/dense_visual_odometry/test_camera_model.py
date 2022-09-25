@@ -29,7 +29,7 @@ class TestRGBDCameraModel(TestCase):
         result = RGBDCameraModel(calib_matrix, scale)
 
         # Then
-        expected_calib_matrix = np.eye(4, dtype=np.float32)
+        expected_calib_matrix = np.zeros((3, 4), dtype=np.float32)
         expected_calib_matrix[:3, :3] = calib_matrix
         np.testing.assert_equal(result.calibration_matrix, expected_calib_matrix)
         self.assertEqual(result.depth_scale, scale)
@@ -73,7 +73,10 @@ class TestRGBDCameraModel(TestCase):
         # Then
         path_mock.exists.assert_called_once()
         path_mock.open.assert_called_once_with("r")
-        np.testing.assert_equal(result.calibration_matrix, np.eye(4, dtype=np.float32))
+
+        expected_calibration_matrix = np.zeros((3, 4), dtype=np.float32)
+        expected_calibration_matrix[:3, :3] = np.eye(3, dtype=np.float32)
+        np.testing.assert_equal(result.calibration_matrix, expected_calibration_matrix)
         self.assertEqual(result.depth_scale, 1.0)
 
     @patch("dense_visual_odometry.camera_model.logger")
@@ -132,6 +135,7 @@ class TestRGBDCameraModel(TestCase):
         depth_image[5:, :2] = 3.0
         depth_scale = 0.5
 
+        # Perfect pin-hole camera with 0.5 scale
         camera_model = RGBDCameraModel(calibration_matrix=np.eye(3, dtype=np.float32), depth_scale=depth_scale)
 
         # When
@@ -143,6 +147,8 @@ class TestRGBDCameraModel(TestCase):
             (x.reshape(1, -1), y.reshape(1, -1), depth_image.reshape(1, -1) * depth_scale,
              np.ones((1, height * width), dtype=np.float32))
         )
+        print(expected_pointcloud[:, -20:])
+        print(pointcloud[:, -20:])
         np.testing.assert_equal(pointcloud, expected_pointcloud)
 
     def test__depth_given_image_with_invalid_pixels_and_return_mask__when_deproject__then_ok(self):
