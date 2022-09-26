@@ -7,7 +7,7 @@ class Interp2D:
     """
 
     @staticmethod
-    def bilinear(x: np.ndarray, y: np.ndarray, image: np.ndarray):
+    def bilinear(x: np.ndarray, y: np.ndarray, image: np.ndarray, cast: bool = False):
         """
             Bilinear Interpolation
 
@@ -19,6 +19,8 @@ class Interp2D:
             Array of the y pixel coordinates values to interpolate from `ìmage`
         image : np.ndarrray
             Image to interpolate values from
+        cast : bool
+            Whether or not to cast output value to same data type as `image`
 
         Returns
         -------
@@ -43,14 +45,19 @@ class Interp2D:
         y0 = np.clip(y0, 0, height - 1)
         y1 = np.clip(y1, 0, height - 1)
 
-        Ia = image[y0, x0].astype(np.float16)
-        Ib = image[y1, x0].astype(np.float16)
-        Ic = image[y0, x1].astype(np.float16)
-        Id = image[y1, x1].astype(np.float16)
+        Ia = image[y0, x0]
+        Ib = image[y1, x0]
+        Ic = image[y0, x1]
+        Id = image[y1, x1]
 
         wa = (x1 - x) * (y1 - y)
         wb = (x1 - x) * (y - y0)
         wc = (x - x0) * (y1 - y)
         wd = (x - x0) * (y - y0)
 
-        return (wa * Ia + wb * Ib + wc * Ic + wd * Id)
+        result = (wa * Ia + wb * Ib + wc * Ic + wd * Id)
+
+        if cast:
+            result = result.astype(image.dtype)
+
+        return result
