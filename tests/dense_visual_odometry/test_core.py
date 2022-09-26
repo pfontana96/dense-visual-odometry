@@ -28,7 +28,7 @@ class TestDVO(TestCase):
         depth_image[1, 1] = 0.0  # Adds invalid depth pixel
 
         # When
-        dvo = DenseVisualOdometry(camera_model, np.zeros((6, 1), dtype=np.float32))
+        dvo = DenseVisualOdometry(camera_model, np.zeros((6, 1), dtype=np.float32), 1)
         residuals = dvo._compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32),
                                            keep_dims=False, return_mask=True)  # return_mask should be ignored
 
@@ -50,7 +50,7 @@ class TestDVO(TestCase):
         depth_image[1, 1] = 0.0  # Adds invalid depth pixel
 
         # When
-        dvo = DenseVisualOdometry(camera_model, np.zeros((6, 1), dtype=np.float32))
+        dvo = DenseVisualOdometry(camera_model, np.zeros((6, 1), dtype=np.float32), 1)
         result = dvo._compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32),
                                         keep_dims=True, return_mask=True)  # return_mask should NOT be ignored
 
@@ -75,7 +75,7 @@ class TestDVO(TestCase):
         depth_image[:int(height / 2), :int(width / 2)] = 3.0
 
         # When
-        dvo = DenseVisualOdometry(camera_model, np.zeros((6, 1), dtype=np.float32))
+        dvo = DenseVisualOdometry(camera_model, np.zeros((6, 1), dtype=np.float32), 1)
         residuals = dvo._compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32))
 
         # Then

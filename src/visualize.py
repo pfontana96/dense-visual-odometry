@@ -21,6 +21,17 @@ def create_fixed_transformations():
     return xi_t
 
 
+def load_transformation_from_test_benchmark():
+    with (Path(__file__).resolve().parent.parent / "tests" / "test_data" / "ground_truth.json").open("r") as fp:
+        data = json.load(fp)
+
+    transformations = []
+    for value in data.values():
+        transformations.append(SE3.log(np.array(value["transformation"])))
+
+    return transformations
+
+
 class TF(object):
     def __init__(self, xi: np.ndarray = np.zeros((6, 1))):
         self.xi = xi
@@ -115,6 +126,8 @@ def main():
     # xi_mat = create_fixed_transformations()
     # for i in range(xi_mat.shape[1]):
     #     transformations.append(xi_mat[:, i].reshape(6, 1))
+
+    transformations = load_transformation_from_test_benchmark()
 
     logger.info(np.array(transformations).shape)
 

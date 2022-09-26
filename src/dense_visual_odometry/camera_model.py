@@ -187,6 +187,6 @@ class RGBDCameraModel:
         """
         camera_matrix = np.dot(self.calibration_matrix, SE3.inverse(SE3.exp(camera_pose)))
         points_pixels = np.dot(camera_matrix, pointcloud)
-        points_pixels /= points_pixels[2, :] / self.depth_scale
+        points_pixels /= points_pixels[2, :]
 
         return points_pixels

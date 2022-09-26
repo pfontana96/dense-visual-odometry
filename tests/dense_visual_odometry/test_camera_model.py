@@ -1,4 +1,3 @@
-from unittest import TestCase
 from unittest.mock import Mock, patch
 import pytest
 
@@ -6,19 +5,10 @@ import numpy as np
 import yaml
 
 from dense_visual_odometry.camera_model import RGBDCameraModel
+from dense_visual_odometry.utils.interpolate import Interp2D
 
 
-class TestRGBDCameraModel(TestCase):
-
-    def setUp(self) -> None:
-        self.maxDiff = None
-
-    def tearDown(self) -> None:
-        return super().tearDown()
-
-    @pytest.fixture(autouse=True)
-    def inject_fixtures(self, caplog):
-        self._caplog = caplog
+class TestRGBDCameraModel:
 
     def test_given_calib_matrix_and_scale__when_init__then_ok(self):
 
@@ -29,10 +19,10 @@ class TestRGBDCameraModel(TestCase):
         result = RGBDCameraModel(calib_matrix, scale)
 
         # Then
-        expected_calib_matrix = np.eye(4, dtype=np.float32)
+        expected_calib_matrix = np.zeros((3, 4), dtype=np.float32)
         expected_calib_matrix[:3, :3] = calib_matrix
         np.testing.assert_equal(result.calibration_matrix, expected_calib_matrix)
-        self.assertEqual(result.depth_scale, scale)
+        assert result.depth_scale == scale
 
     def test__given_not_valid_calib_matrix__when_init__then_raise_assertion(self):
 
@@ -41,7 +31,7 @@ class TestRGBDCameraModel(TestCase):
         scale = 1.0
 
         # When + Then
-        with self.assertRaises(AssertionError):
+        with pytest.raises(AssertionError):
             _ = RGBDCameraModel(calib_matrix, scale)
 
     def test__given_not_valid_depth_scale__when_init__then_raises_assertion(self):
@@ -51,7 +41,7 @@ class TestRGBDCameraModel(TestCase):
         scale = -1.0
 
         # When + Then
-        with self.assertRaises(AssertionError):
+        with pytest.raises(AssertionError):
             _ = RGBDCameraModel(calib_matrix, scale)
 
     def test__given_valid_yaml_file__when_load_from_yaml__then_ok(self):
@@ -73,8 +63,11 @@ class TestRGBDCameraModel(TestCase):
         # Then
         path_mock.exists.assert_called_once()
         path_mock.open.assert_called_once_with("r")
-        np.testing.assert_equal(result.calibration_matrix, np.eye(4, dtype=np.float32))
-        self.assertEqual(result.depth_scale, 1.0)
+
+        expected_calibration_matrix = np.zeros((3, 4), dtype=np.float32)
+        expected_calibration_matrix[:3, :3] = np.eye(3, dtype=np.float32)
+        np.testing.assert_equal(result.calibration_matrix, expected_calibration_matrix)
+        assert result.depth_scale == 1.0
 
     @patch("dense_visual_odometry.camera_model.logger")
     @patch("dense_visual_odometry.camera_model.RGBDCameraModel.get_config_file_structure")
@@ -97,7 +90,7 @@ class TestRGBDCameraModel(TestCase):
         result = RGBDCameraModel.load_from_yaml(path_mock)
 
         # Then
-        self.assertIsNone(result)
+        assert result is None
         logger_mock.error.assert_called_once()
         logger_mock.warning.assert_called_once()
         get_config_file_structure_mock.assert_called_once()
@@ -113,7 +106,7 @@ class TestRGBDCameraModel(TestCase):
 
         # Then
         path_mock.exists.assert_called_once()
-        self.assertIsNone(result)
+        assert result is None
         logger_mock.error.assert_called_once()
 
     def test__when_get_config_file_structure__then_str(self):
@@ -121,7 +114,7 @@ class TestRGBDCameraModel(TestCase):
         result = RGBDCameraModel.get_config_file_structure()
 
         # Then
-        self.assertTrue(isinstance(result, str))
+        assert isinstance(result, str) is True
 
     def test__given_known_depth_image__when_deproject__then_ok(self):
 
@@ -132,6 +125,7 @@ class TestRGBDCameraModel(TestCase):
         depth_image[5:, :2] = 3.0
         depth_scale = 0.5
 
+        # Perfect pin-hole camera with 0.5 scale
         camera_model = RGBDCameraModel(calibration_matrix=np.eye(3, dtype=np.float32), depth_scale=depth_scale)
 
         # When
@@ -139,9 +133,9 @@ class TestRGBDCameraModel(TestCase):
 
         # Then
         x, y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
+        z = depth_image.reshape(1, -1) * depth_scale
         expected_pointcloud = np.vstack(
-            (x.reshape(1, -1), y.reshape(1, -1), depth_image.reshape(1, -1) * depth_scale,
-             np.ones((1, height * width), dtype=np.float32))
+            (x.reshape(1, -1) * z, y.reshape(1, -1) * z, z, np.ones((1, height * width), dtype=np.float32))
         )
         np.testing.assert_equal(pointcloud, expected_pointcloud)
 
@@ -165,10 +159,11 @@ class TestRGBDCameraModel(TestCase):
         x, y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
         x = x[expected_mask]
         y = y[expected_mask]
+        z = depth_image[expected_mask].reshape(1, -1) * depth_scale
         expected_pointcloud = np.vstack(
-            (x.reshape(1, -1), y.reshape(1, -1), depth_image[expected_mask].reshape(1, -1) * depth_scale,
-             np.ones_like(x).reshape(1, -1))
+            (x.reshape(1, -1) * z, y.reshape(1, -1) * z, z, np.ones_like(x).reshape(1, -1))
         )
+
         np.testing.assert_equal(pointcloud, expected_pointcloud)
         np.testing.assert_equal(mask, expected_mask)
 
@@ -179,7 +174,7 @@ class TestRGBDCameraModel(TestCase):
         depth_scale = 0.5
 
         x, y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
-        z = np.arange(height * width).reshape(1, -1) / depth_scale
+        z = np.arange(height * width).reshape(1, -1)
         pointcloud = np.vstack(
             (x.reshape(1, -1), y.reshape(1, -1), z, np.ones((1, height * width), dtype=np.float32))
         )
@@ -190,5 +185,28 @@ class TestRGBDCameraModel(TestCase):
         pixel_points = camera_model.project(pointcloud, np.zeros((6, 1), dtype=np.float32))[:2]
 
         # Then
-        expected_pixel_points = pointcloud[:2]
+        expected_pixel_points = pointcloud[:2] / pointcloud[2]
         np.testing.assert_equal(pixel_points, expected_pixel_points)
+
+    def test__given_gray_and_depth_image__when_deproject_and_project__then_almost_equal(
+        self, load_camera_intrinsics_file, load_single_benchmark_case
+    ):
+
+        # Given
+        camera_model = RGBDCameraModel.load_from_yaml(load_camera_intrinsics_file)
+
+        gray_image, depth_image, _ = load_single_benchmark_case
+
+        camera_pose = np.zeros((6, 1), dtype=np.float32)
+
+        # When
+        pointcloud, mask = camera_model.deproject(depth_image=depth_image, camera_pose=camera_pose, return_mask=True)
+        projected_points = camera_model.project(pointcloud=pointcloud, camera_pose=camera_pose)
+
+        # Then
+        projected_image = np.zeros_like(gray_image)
+        projected_image[mask] = Interp2D.bilinear(
+            x=projected_points[0], y=projected_points[1], image=gray_image, cast=True
+        )
+
+        np.testing.assert_allclose(gray_image[mask], projected_image[mask], atol=2.0)
