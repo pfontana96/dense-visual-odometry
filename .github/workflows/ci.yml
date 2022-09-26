@@ -2,6 +2,9 @@ name: CI
 
 on: [push]
 
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 jobs:
   Quality:
     runs-on: ubuntu-20.04
