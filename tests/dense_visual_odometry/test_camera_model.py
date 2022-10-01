@@ -188,6 +188,7 @@ class TestRGBDCameraModel:
         expected_pixel_points = pointcloud[:2] / pointcloud[2]
         np.testing.assert_equal(pixel_points, expected_pixel_points)
 
+    @pytest.mark.parametrize("load_single_benchmark_case", list(range(1, 10)), indirect=True)
     def test__given_gray_and_depth_image__when_deproject_and_project__then_almost_equal(
         self, load_camera_intrinsics_file, load_single_benchmark_case
     ):
@@ -195,7 +196,9 @@ class TestRGBDCameraModel:
         # Given
         camera_model = RGBDCameraModel.load_from_yaml(load_camera_intrinsics_file)
 
-        gray_image, depth_image, _ = load_single_benchmark_case
+        gray_images, depth_images, _ = load_single_benchmark_case
+        gray_image = gray_images[0]
+        depth_image = depth_images[0]
 
         camera_pose = np.zeros((6, 1), dtype=np.float32)
 
