@@ -16,12 +16,13 @@ class TestRGBDCameraModel:
         calib_matrix = np.eye(3, dtype=np.float32)
         scale = 1.0
 
-        result = RGBDCameraModel(calib_matrix, scale)
+        result = RGBDCameraModel(calib_matrix, scale, 10, 10)
 
         # Then
+        assert result is not None
         expected_calib_matrix = np.zeros((3, 4), dtype=np.float32)
         expected_calib_matrix[:3, :3] = calib_matrix
-        np.testing.assert_equal(result.calibration_matrix, expected_calib_matrix)
+        np.testing.assert_equal(result.intrinsics, expected_calib_matrix)
         assert result.depth_scale == scale
 
     def test__given_not_valid_calib_matrix__when_init__then_raise_assertion(self):
@@ -32,7 +33,7 @@ class TestRGBDCameraModel:
 
         # When + Then
         with pytest.raises(AssertionError):
-            _ = RGBDCameraModel(calib_matrix, scale)
+            _ = RGBDCameraModel(calib_matrix, scale, 10, 10)
 
     def test__given_not_valid_depth_scale__when_init__then_raises_assertion(self):
 
@@ -42,14 +43,16 @@ class TestRGBDCameraModel:
 
         # When + Then
         with pytest.raises(AssertionError):
-            _ = RGBDCameraModel(calib_matrix, scale)
+            _ = RGBDCameraModel(calib_matrix, scale, 10, 10)
 
     def test__given_valid_yaml_file__when_load_from_yaml__then_ok(self):
 
         # Given
         valid_file_content = yaml.dump({
-            RGBDCameraModel.CALIBRATION_MATRIX_KEYWORD: np.eye(3, dtype=np.float32),
-            RGBDCameraModel.DEPTH_SCALE_KEYWORD: 1.0
+            RGBDCameraModel.INTRINSICS_KEYWORD: np.eye(3, dtype=np.float32),
+            RGBDCameraModel.DEPTH_SCALE_KEYWORD: 1.0,
+            RGBDCameraModel.HEIGHT_KEYWORD: 10,
+            RGBDCameraModel.WIDTH_KEYWORD: 20
         })
 
         # Mock pathlib.Path
@@ -64,16 +67,13 @@ class TestRGBDCameraModel:
         path_mock.exists.assert_called_once()
         path_mock.open.assert_called_once_with("r")
 
-        expected_calibration_matrix = np.zeros((3, 4), dtype=np.float32)
-        expected_calibration_matrix[:3, :3] = np.eye(3, dtype=np.float32)
-        np.testing.assert_equal(result.calibration_matrix, expected_calibration_matrix)
+        expected_intrinsics = np.zeros((3, 4), dtype=np.float32)
+        expected_intrinsics[:3, :3] = np.eye(3, dtype=np.float32)
+        np.testing.assert_equal(result.intrinsics, expected_intrinsics)
         assert result.depth_scale == 1.0
 
     @patch("dense_visual_odometry.camera_model.logger")
-    @patch("dense_visual_odometry.camera_model.RGBDCameraModel.get_config_file_structure")
-    def test__given_not_valid_yaml_file__when_load_from_yaml__then_none(
-        self, get_config_file_structure_mock, logger_mock
-    ):
+    def test__given_not_valid_yaml_file__when_load_from_yaml__then_none(self, logger_mock):
 
         # Given
         not_valid_file_content = yaml.dump({
@@ -92,8 +92,6 @@ class TestRGBDCameraModel:
         # Then
         assert result is None
         logger_mock.error.assert_called_once()
-        logger_mock.warning.assert_called_once()
-        get_config_file_structure_mock.assert_called_once()
 
     @patch("dense_visual_odometry.camera_model.logger")
     def test__given_non_existent_file__when_load_from_yaml__then_none(self, logger_mock):
@@ -109,13 +107,6 @@ class TestRGBDCameraModel:
         assert result is None
         logger_mock.error.assert_called_once()
 
-    def test__when_get_config_file_structure__then_str(self):
-        # When
-        result = RGBDCameraModel.get_config_file_structure()
-
-        # Then
-        assert isinstance(result, str) is True
-
     def test__given_known_depth_image__when_deproject__then_ok(self):
 
         # Given
@@ -126,7 +117,9 @@ class TestRGBDCameraModel:
         depth_scale = 0.5
 
         # Perfect pin-hole camera with 0.5 scale
-        camera_model = RGBDCameraModel(calibration_matrix=np.eye(3, dtype=np.float32), depth_scale=depth_scale)
+        camera_model = RGBDCameraModel(
+            intrinsics=np.eye(3, dtype=np.float32), depth_scale=depth_scale, height=height, width=width
+        )
 
         # When
         pointcloud = camera_model.deproject(depth_image, np.zeros((6, 1), dtype=np.float32))
@@ -149,7 +142,9 @@ class TestRGBDCameraModel:
         depth_image[0, 1] = 0.0
         depth_scale = 0.5
 
-        camera_model = RGBDCameraModel(calibration_matrix=np.eye(3, dtype=np.float32), depth_scale=depth_scale)
+        camera_model = RGBDCameraModel(
+            intrinsics=np.eye(3, dtype=np.float32), depth_scale=depth_scale, height=height, width=width
+        )
 
         # When
         pointcloud, mask = camera_model.deproject(depth_image, np.zeros((6, 1), dtype=np.float32), return_mask=True)
@@ -179,7 +174,9 @@ class TestRGBDCameraModel:
             (x.reshape(1, -1), y.reshape(1, -1), z, np.ones((1, height * width), dtype=np.float32))
         )
 
-        camera_model = RGBDCameraModel(calibration_matrix=np.eye(3, dtype=np.float32), depth_scale=depth_scale)
+        camera_model = RGBDCameraModel(
+            intrinsics=np.eye(3, dtype=np.float32), depth_scale=depth_scale, height=height, width=width
+        )
 
         # When
         pixel_points = camera_model.project(pointcloud, np.zeros((6, 1), dtype=np.float32))[:2]

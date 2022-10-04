@@ -4,7 +4,7 @@ import logging
 import yaml
 from typing import Union
 
-from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
+from dense_visual_odometry.utils.lie_algebra import SE3
 from dense_visual_odometry.utils.numpy_cache import np_cache
 
 
@@ -18,22 +18,24 @@ class RGBDCameraModel:
     """
 
     # Keywords for loading camera model from a config file
-    CALIBRATION_MATRIX_KEYWORD = "calibration_matrix"
+    INTRINSICS_KEYWORD = "intrinsics"
     DEPTH_SCALE_KEYWORD = "depth_scale"
     DISTORSSION_COEFFS_KEYWORD = "distorssion_coefficients"
     DISTORSSION_MODEL_KEYWORD = "distorssion_model"
+    HEIGHT_KEYWORD = "height"
+    WIDTH_KEYWORD = "width"
 
     def __init__(
-        self, calibration_matrix: np.ndarray, depth_scale: float, distorssion_coeffs: Union[np.ndarray, None] = None,
-        distorssion_model: Union[str, None] = None
+        self, intrinsics: np.ndarray, depth_scale: float, height: int, width: int,
+        distorssion_coeffs: Union[np.ndarray, None] = None, distorssion_model: Union[str, None] = None
     ):
         """
             Creates a RGBDCameraModel instance
 
         Parameters
         ----------
-        calibration_matrix : np.ndarray
-            3x3 calibration matrix
+        intrinsics : np.ndarray
+            3x3 instrinsics matrix
                 [fx  s cx]
                 [ 0 fy cy]
                 [ 0  0  1]
@@ -44,41 +46,27 @@ class RGBDCameraModel:
         depth_scale : float
             Scale (multiplication factor) used to convert from the sensor Digital Number to meters
         """
-        assertion_message = f"Expected a 3x3 `calibration_matrix`, got {calibration_matrix.shape} instead"
-        assert calibration_matrix.shape == (3, 3), assertion_message
-        assertion_message = "Expected `scale` to be a positive floating point, got `{:.3f}` instead".format(depth_scale)
+        assertion_message = f"Expected a 3x3 'intrinsics', got {intrinsics.shape} instead"
+        assert intrinsics.shape == (3, 3), assertion_message
+        assertion_message = "Expected 'scale' to be a positive floating point, got '{:.3f}' instead".format(depth_scale)
         assert depth_scale >= 0.0, assertion_message
 
         # Store calibration matrix as a 3x4 matrix
-        self.calibration_matrix = np.zeros((3, 4), dtype=np.float32)
-        self.calibration_matrix[:3, :3] = calibration_matrix
+        self._intrinsics = np.zeros((3, 4), dtype=np.float32)
+        self._intrinsics[:3, :3] = intrinsics
         self.depth_scale = depth_scale
 
         self.distorssion_coeffs = distorssion_coeffs
         self.distorsion_model = distorssion_model
 
-    @classmethod
-    def get_config_file_structure(cls):
-        structure = """
-        {}: 3x3 calibration matrix
-        \t[fx  s cx]
-        \t[ 0 fy cy]
-        \t[ 0  0  1]
-        \t with:
-        \t\tfx, fy: Focal lengths for the sensor in X and Y dimensions
-        \t\ts: Any possible skew between the sensor axes caused by sensor not being perpendicular from optical axis
-        \t\tcx, cy: Image center expressed in pixel coordinates
-        {}: float
-        \tScale used to convert from the sensor Digital Number to meters
-        {}: Distorssion coefficients (Optional)
-        \t:TODO:
-        {}: Distorssion model used (Optional)
-        \t:TODO:
-        """.format(
-            cls.CALIBRATION_MATRIX_KEYWORD, cls.DEPTH_SCALE_KEYWORD, cls.DISTORSSION_COEFFS_KEYWORD,
-            cls.DISTORSSION_MODEL_KEYWORD
-        )
-        return structure
+        self._shape = (height, width)
+
+        # Compute sensor grid
+        # TODO: Use a more efficient way of creating pointcloud -> Several pixels values are repeated. See `sparse`
+        # parameter of `np.meshgrid`
+        x_pixel, y_pixel = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
+        self._x_px = x_pixel.reshape(-1)
+        self._y_px = y_pixel.reshape(-1)
 
     @classmethod
     def load_from_yaml(cls, filepath: Path):
@@ -102,18 +90,18 @@ class RGBDCameraModel:
 
         data = yaml.load(filepath.open("r"), yaml.Loader)
         try:
-            camera_matrix = np.array(data[cls.CALIBRATION_MATRIX_KEYWORD], dtype=np.float32)
+            camera_matrix = np.array(data[cls.INTRINSICS_KEYWORD], dtype=np.float32)
             depth_scale = data[cls.DEPTH_SCALE_KEYWORD]
+            height = data[cls.HEIGHT_KEYWORD]
+            width = data[cls.WIDTH_KEYWORD]
             distorssion_coefficients = data.get(cls.DISTORSSION_COEFFS_KEYWORD)
             distorssion_model = data.get(cls.DISTORSSION_MODEL_KEYWORD)
 
         except KeyError as e:
             logger.error(e)
-            message = "Please use a valid file:\n" + cls.get_config_file_structure()
-            logger.warning(message)
             return None
 
-        return cls(camera_matrix, depth_scale, distorssion_coefficients, distorssion_model)
+        return cls(camera_matrix, depth_scale, height, width, distorssion_coefficients, distorssion_model)
 
     @np_cache
     def deproject(self, depth_image: np.ndarray, camera_pose: np.ndarray, return_mask: bool = False):
@@ -136,24 +124,21 @@ class RGBDCameraModel:
         mask : np.ndarray, optional
             Boolean mask with the same shape as `depth_image` with True on valid pixels and false on non valid.
         """
-        height, width = depth_image.shape
-
+        assert depth_image.shape == self._shape, "Expected 'depth_image' shape to be '{}', got '{}' instead".format(
+            self._shape, depth_image.shape
+        )
         z = depth_image.reshape(-1) * self.depth_scale
 
         # Remove invalid points
         mask = z != 0.0
         z = z[mask]
 
-        # Create pixel grid
-        # TODO: Use a more efficient way of creating pointcloud -> Several pixels values are repeated. See `sparse`
-        # parameter of `np.meshgrid`
-        x_pixel, y_pixel = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
-        x_pixel = x_pixel.reshape(-1)[mask]
-        y_pixel = y_pixel.reshape(-1)[mask]
+        x_pixel = self._x_px[mask]
+        y_pixel = self._y_px[mask]
 
         # Map from pixel position to 3d coordinates using camera matrix (inverted)
         # Get x, y points w.r.t camera reference frame (still not multiply by the depth)
-        points = np.dot(np.linalg.inv(self.calibration_matrix[:3, :3]), np.vstack((x_pixel, y_pixel, np.ones_like(z))))
+        points = np.dot(np.linalg.inv(self._intrinsics[:3, :3]), np.vstack((x_pixel, y_pixel, np.ones_like(z))))
 
         pointcloud = np.vstack((points[0, :] * z, points[1, :] * z, z, np.ones_like(z)))
 
@@ -161,7 +146,7 @@ class RGBDCameraModel:
         pointcloud = np.dot(SE3.exp(camera_pose), pointcloud)
 
         if return_mask:
-            return (pointcloud, mask.reshape(height, width))
+            return (pointcloud, mask.reshape(self._shape))
 
         return pointcloud
 
@@ -185,8 +170,12 @@ class RGBDCameraModel:
             values might not be integer and might lie between physical pixels, user must then decide what to do
             with those
         """
-        camera_matrix = np.dot(self.calibration_matrix, SE3.inverse(SE3.exp(camera_pose)))
+        camera_matrix = np.dot(self._intrinsics, SE3.inverse(SE3.exp(camera_pose)))
         points_pixels = np.dot(camera_matrix, pointcloud)
         points_pixels /= points_pixels[2, :]
 
         return points_pixels
+
+    @property
+    def intrinsics(self):
+        return self._intrinsics

@@ -1,5 +1,5 @@
 # See: https://vision.in.tum.de/data/datasets/rgbd-dataset/file_formats
-calibration_matrix:
+intrinsics:
   - - 525.0
     - 0.0
     - 319.5
@@ -16,3 +16,5 @@ calibration_matrix:
 #   - 0.0
 #   - 0.0
 depth_scale: 0.0002
+height: 480
+width: 640

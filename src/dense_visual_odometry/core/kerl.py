@@ -162,7 +162,7 @@ class KerlDVO(BaseDenseVisualOdometry):
         )
 
         J_w = compute_jacobian_of_warp_function(
-            pointcloud=pointcloud, calibration_matrix=self._camera_model.calibration_matrix
+            pointcloud=pointcloud, calibration_matrix=self._camera_model._intrinsics
         )
 
         gradx, grady = compute_gradients(image=image, kernel_size=3)

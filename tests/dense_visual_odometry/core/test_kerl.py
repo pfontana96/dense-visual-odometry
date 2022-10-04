@@ -7,16 +7,19 @@ from dense_visual_odometry.camera_model import RGBDCameraModel
 from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
 
 
+_PERFECT_IMAGE_SHAPE = (10, 10)
+
+
 class TestDVO:
 
     @property
     def perfect_camera_model(self):
-        return RGBDCameraModel(np.eye(3, dtype=np.float32), 1.0)
+        return RGBDCameraModel(np.eye(3, dtype=np.float32), 1.0, _PERFECT_IMAGE_SHAPE[0], _PERFECT_IMAGE_SHAPE[1])
 
     def test__given_keep_dims_false__when_compute_residuals__then_shape_is_correct(self):
 
         # Given
-        gray_image = np.zeros((5, 5), dtype=np.float32)
+        gray_image = np.zeros(_PERFECT_IMAGE_SHAPE, dtype=np.float32)
 
         depth_image = np.ones_like(gray_image)
         depth_image[1, 1] = 0.0  # Adds invalid depth pixel
@@ -34,7 +37,7 @@ class TestDVO:
     def test__given_return_mask_true__when_compute_residuals__then_ok(self):
 
         # Given
-        gray_image = np.zeros((5, 5), dtype=np.float32)
+        gray_image = np.zeros(_PERFECT_IMAGE_SHAPE, dtype=np.float32)
 
         depth_image = np.ones_like(gray_image)
         depth_image[1, 1] = 0.0  # Adds invalid depth pixel
@@ -52,7 +55,7 @@ class TestDVO:
     def test__given_same_image_and_no_transform__when_compute_residuals__then_zero(self):
 
         # Given
-        height, width = (8, 15)
+        height, width = _PERFECT_IMAGE_SHAPE
         intensity_value = 150
         gray_image = np.full(shape=(height, width), fill_value=intensity_value, dtype=np.uint8)
         gray_image[:int(height / 2), :int(width / 2)] = intensity_value / 3.0
