@@ -1,5 +1,5 @@
 import logging
-from typing import OrderedDict
+from typing import OrderedDict, Type
 
 import numpy as np
 
@@ -45,7 +45,7 @@ class KerlDVO(BaseDenseVisualOdometry):
     _SUCCESS = 0x3
 
     def __init__(
-        self, camera_model: RGBDCameraModel, initial_pose: np.ndarray, levels: int, weighter: BaseWeighter = None
+        self, camera_model: RGBDCameraModel, initial_pose: np.ndarray, levels: int, weighter: Type[BaseWeighter] = None
     ):
         """
         Parameters
@@ -226,6 +226,12 @@ class KerlDVO(BaseDenseVisualOdometry):
         err_prev = np.finfo("float32").max
         xi = init_guess
 
+        # Compute Jacobian
+        jacobian_at_initguess = self._compute_jacobian(
+            image=gray_image_prev, depth_image=depth_image_prev, camera_pose=xi
+        )
+        jacobian_t = jacobian_at_initguess.T
+
         additional_information = OrderedDict()
 
         error_increased_count = 0
@@ -239,21 +245,24 @@ class KerlDVO(BaseDenseVisualOdometry):
             )
             residuals = residuals[mask].reshape(-1, 1)
 
-            # Compute Jacobian
-            jacobian = self._compute_jacobian(image=gray_image_prev, depth_image=depth_image_prev, camera_pose=xi)
-            jacobian_t = jacobian.T
-
             # Computes weights if required
             if self._weighter is not None:
+
                 weights = self._weighter.weight(residuals=residuals)
-                residuals = weights * residuals
-                jacobian = weights * residuals
+                residuals = np.sqrt(weights) * residuals
+                jacobian = np.sqrt(weights) * jacobian_at_initguess
+
+            else:
+                jacobian = jacobian_at_initguess
 
             # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
             H = np.dot(jacobian_t, jacobian)
             b = - np.dot(jacobian_t, residuals)
 
-            delta_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
+            L = np.linalg.cholesky(H)
+            y = np.linalg.solve(L.T, b)
+            delta_xi = np.linalg.solve(L, y)
+            # delta_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
 
             # Update
             xi = SE3.log(np.dot(SE3.exp(xi), SE3.exp(delta_xi)))
@@ -268,6 +277,7 @@ class KerlDVO(BaseDenseVisualOdometry):
 
                 if error_increased_count > max_allowed_error_increase_steps:
                     end_cause = KerlDVO._ERROR_INCREASED_ON_ITERATION
+                    logger.warning("Error increased, stopping iterations")
                     break
             else:
                 error_increased_count = 0
@@ -305,4 +315,5 @@ class KerlDVO(BaseDenseVisualOdometry):
 
         # Clean cache
         self._camera_model.deproject.cache_clear()
-        logger.info("DONE")
+
+        return transformation

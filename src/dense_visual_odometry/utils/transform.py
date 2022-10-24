@@ -71,7 +71,8 @@ def find_rigid_body_transform_from_pointclouds(src_pc: np.ndarray, dst_pc: np.nd
     # Compute translation
     T = dst_centroids - np.dot(R, src_centroids)
 
-    # Assert result
-    residuals = dst_pc - (np.dot(R, src_pc) + T)
+    transform = np.eye(4, dtype=np.float32)
+    transform[:3, :3] = R
+    transform[:3, 3] = T.reshape(-1)
 
-    return R, T, residuals
+    return transform

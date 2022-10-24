@@ -22,12 +22,10 @@ class RGBDCameraModel:
     DEPTH_SCALE_KEYWORD = "depth_scale"
     DISTORSSION_COEFFS_KEYWORD = "distorssion_coefficients"
     DISTORSSION_MODEL_KEYWORD = "distorssion_model"
-    HEIGHT_KEYWORD = "height"
-    WIDTH_KEYWORD = "width"
 
     def __init__(
-        self, intrinsics: np.ndarray, depth_scale: float, height: int, width: int,
-        distorssion_coeffs: Union[np.ndarray, None] = None, distorssion_model: Union[str, None] = None
+        self, intrinsics: np.ndarray, depth_scale: float, distorssion_coeffs: Union[np.ndarray, None] = None,
+        distorssion_model: Union[str, None] = None
     ):
         """
             Creates a RGBDCameraModel instance
@@ -59,15 +57,6 @@ class RGBDCameraModel:
         self.distorssion_coeffs = distorssion_coeffs
         self.distorsion_model = distorssion_model
 
-        self._shape = (height, width)
-
-        # Compute sensor grid
-        # TODO: Use a more efficient way of creating pointcloud -> Several pixels values are repeated. See `sparse`
-        # parameter of `np.meshgrid`
-        x_pixel, y_pixel = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
-        self._x_px = x_pixel.reshape(-1)
-        self._y_px = y_pixel.reshape(-1)
-
     @classmethod
     def load_from_yaml(cls, filepath: Path):
         """
@@ -92,8 +81,6 @@ class RGBDCameraModel:
         try:
             camera_matrix = np.array(data[cls.INTRINSICS_KEYWORD], dtype=np.float32)
             depth_scale = data[cls.DEPTH_SCALE_KEYWORD]
-            height = data[cls.HEIGHT_KEYWORD]
-            width = data[cls.WIDTH_KEYWORD]
             distorssion_coefficients = data.get(cls.DISTORSSION_COEFFS_KEYWORD)
             distorssion_model = data.get(cls.DISTORSSION_MODEL_KEYWORD)
 
@@ -101,7 +88,7 @@ class RGBDCameraModel:
             logger.error(e)
             return None
 
-        return cls(camera_matrix, depth_scale, height, width, distorssion_coefficients, distorssion_model)
+        return cls(camera_matrix, depth_scale, distorssion_coefficients, distorssion_model)
 
     @np_cache
     def deproject(self, depth_image: np.ndarray, camera_pose: np.ndarray, return_mask: bool = False):
@@ -124,17 +111,22 @@ class RGBDCameraModel:
         mask : np.ndarray, optional
             Boolean mask with the same shape as `depth_image` with True on valid pixels and false on non valid.
         """
-        assert depth_image.shape == self._shape, "Expected 'depth_image' shape to be '{}', got '{}' instead".format(
-            self._shape, depth_image.shape
-        )
+        height, width = depth_image.shape
         z = depth_image.reshape(-1) * self.depth_scale
 
         # Remove invalid points
         mask = z != 0.0
         z = z[mask]
 
-        x_pixel = self._x_px[mask]
-        y_pixel = self._y_px[mask]
+        # Compute sensor grid
+        # TODO: Use a more efficient way of creating pointcloud -> Several pixels values are repeated. See `sparse`
+        # parameter of `np.meshgrid`
+        x_pixel, y_pixel = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
+        x_pixel = x_pixel.reshape(-1)
+        y_pixel = y_pixel.reshape(-1)
+
+        x_pixel = x_pixel[mask]
+        y_pixel = y_pixel[mask]
 
         # Map from pixel position to 3d coordinates using camera matrix (inverted)
         # Get x, y points w.r.t camera reference frame (still not multiply by the depth)
@@ -146,7 +138,7 @@ class RGBDCameraModel:
         pointcloud = np.dot(SE3.exp(camera_pose), pointcloud)
 
         if return_mask:
-            return (pointcloud, mask.reshape(self._shape))
+            return (pointcloud, mask.reshape(depth_image.shape))
 
         return pointcloud
 

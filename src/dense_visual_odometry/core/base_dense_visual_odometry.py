@@ -59,7 +59,7 @@ class BaseDenseVisualOdometry(abc.ABC):
             )
 
         # Update
-        self.current_pose = SE3.log(self.current_pose + transform)
+        self._current_pose = SE3.log(np.dot(SE3.exp(transform), SE3.exp(self._current_pose)))
         self.gray_image_prev = gray_image
         self.depth_image_prev = depth_image
 

@@ -51,8 +51,6 @@ class TestRGBDCameraModel:
         valid_file_content = yaml.dump({
             RGBDCameraModel.INTRINSICS_KEYWORD: np.eye(3, dtype=np.float32),
             RGBDCameraModel.DEPTH_SCALE_KEYWORD: 1.0,
-            RGBDCameraModel.HEIGHT_KEYWORD: 10,
-            RGBDCameraModel.WIDTH_KEYWORD: 20
         })
 
         # Mock pathlib.Path
@@ -111,15 +109,13 @@ class TestRGBDCameraModel:
 
         # Given
         height, width = (10, 10)
-        depth_image = np.ones((10, 10), dtype=np.float32)
+        depth_image = np.ones((height, width), dtype=np.float32)
         depth_image[:5] = 2.0
         depth_image[5:, :2] = 3.0
         depth_scale = 0.5
 
         # Perfect pin-hole camera with 0.5 scale
-        camera_model = RGBDCameraModel(
-            intrinsics=np.eye(3, dtype=np.float32), depth_scale=depth_scale, height=height, width=width
-        )
+        camera_model = RGBDCameraModel(intrinsics=np.eye(3, dtype=np.float32), depth_scale=depth_scale)
 
         # When
         pointcloud = camera_model.deproject(depth_image, np.zeros((6, 1), dtype=np.float32))
@@ -135,16 +131,14 @@ class TestRGBDCameraModel:
     def test__depth_given_image_with_invalid_pixels_and_return_mask__when_deproject__then_ok(self):
         # Given
         height, width = (10, 10)
-        depth_image = np.ones((10, 10), dtype=np.float32)
+        depth_image = np.ones((height, width), dtype=np.float32)
         depth_image[:5] = 2.0
         depth_image[5:, :2] = 3.0
         depth_image[0, 0] = 0.0
         depth_image[0, 1] = 0.0
         depth_scale = 0.5
 
-        camera_model = RGBDCameraModel(
-            intrinsics=np.eye(3, dtype=np.float32), depth_scale=depth_scale, height=height, width=width
-        )
+        camera_model = RGBDCameraModel(intrinsics=np.eye(3, dtype=np.float32), depth_scale=depth_scale)
 
         # When
         pointcloud, mask = camera_model.deproject(depth_image, np.zeros((6, 1), dtype=np.float32), return_mask=True)
@@ -174,9 +168,7 @@ class TestRGBDCameraModel:
             (x.reshape(1, -1), y.reshape(1, -1), z, np.ones((1, height * width), dtype=np.float32))
         )
 
-        camera_model = RGBDCameraModel(
-            intrinsics=np.eye(3, dtype=np.float32), depth_scale=depth_scale, height=height, width=width
-        )
+        camera_model = RGBDCameraModel(intrinsics=np.eye(3, dtype=np.float32), depth_scale=depth_scale)
 
         # When
         pixel_points = camera_model.project(pointcloud, np.zeros((6, 1), dtype=np.float32))[:2]
