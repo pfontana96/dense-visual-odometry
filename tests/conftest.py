@@ -24,7 +24,7 @@ def _load_depth_image(filepath: str):
 
 @pytest.fixture
 def load_camera_intrinsics_file():
-    filepath = _TEST_DATADIR / "test_camera_intrinsics.yaml"
+    filepath = _TEST_DATADIR / "camera_intrinsics.yaml"
     return filepath
 
 
@@ -47,17 +47,23 @@ def load_test_benchmark():
 
 
 @pytest.fixture
-def load_single_benchmark_case():
+def load_single_benchmark_case(request):
+
+    assert isinstance(request.param, int), "Expected request parameter to be 'int', got '{}' instead".format(
+        type(request.param)
+    )
+    index = request.param
 
     # Load ground truth
     with (_TEST_DATADIR / "ground_truth.json").open("r") as fp:
         ground_truth_data = json.load(fp)
 
-    index = "5"  # Randomly chosen
-    ground_truth = ground_truth_data[index]
+    gray_images = []
+    depth_images = []
+    transformations = []
+    for i in range(index, index + 2):
+        gray_images.append(_load_grayscale_image(str(_TEST_DATADIR / ground_truth_data[str(i)]["rgb"])))
+        depth_images.append(_load_depth_image(str(_TEST_DATADIR / ground_truth_data[str(i)]["depth"])))
+        transformations.append(np.array(ground_truth_data[str(i)]["transformation"]))
 
-    gray_image = _load_grayscale_image(str(_TEST_DATADIR / ground_truth["rgb"]))
-    depth_image = _load_depth_image(str(_TEST_DATADIR / ground_truth["depth"]))
-    transformation = np.array(ground_truth["transformation"])
-
-    return gray_image, depth_image, transformation
+    return gray_images, depth_images, transformations

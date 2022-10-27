@@ -11,7 +11,7 @@ class BaseWeighter(abc.ABC):
         """
         Returns
         -------
-        weighted_residuals : np.ndarray
+        weights : np.ndarray
             Array of the same shape as `residuals` with pixelwise weights
         """
         raise NotImplementedError()
