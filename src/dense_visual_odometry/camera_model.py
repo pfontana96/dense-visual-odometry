@@ -77,7 +77,9 @@ class RGBDCameraModel:
             logger.error("Could not find configuration file '{}'".format(str(filepath)))
             return None
 
-        data = yaml.load(filepath.open("r"), yaml.Loader)
+        with filepath.open("r") as fp:
+            data = yaml.load(fp, yaml.Loader)
+
         try:
             camera_matrix = np.array(data[cls.INTRINSICS_KEYWORD], dtype=np.float32)
             depth_scale = data[cls.DEPTH_SCALE_KEYWORD]

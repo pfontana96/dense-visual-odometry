@@ -59,7 +59,10 @@ class BaseDenseVisualOdometry(abc.ABC):
             )
 
         # Update
-        self._current_pose = SE3.log(np.dot(SE3.exp(transform), SE3.exp(self._current_pose)))
+        # 'transform' is transform of camera {t-1}_to_{t} and '_current_pose' is {t-1}_to_{world} so most recent current
+        # pose (ergo {t}_to_{world}) will be:
+        # current_pose = {t-1}_to_{world} * {t}_to_{t-1} = {t-1}_to_{world} * ({t-1}_to_{t})^(-1)
+        self._current_pose = SE3.log(np.dot(SE3.exp(self._current_pose), SE3.inverse(SE3.exp(transform))))
         self.gray_image_prev = gray_image
         self.depth_image_prev = depth_image
 

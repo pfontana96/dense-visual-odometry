@@ -1,4 +1,4 @@
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 import numpy as np
@@ -6,6 +6,7 @@ import yaml
 
 from dense_visual_odometry.camera_model import RGBDCameraModel
 from dense_visual_odometry.utils.interpolate import Interp2D
+from dense_visual_odometry.utils.lie_algebra import SE3
 
 
 class TestRGBDCameraModel:
@@ -54,9 +55,10 @@ class TestRGBDCameraModel:
         })
 
         # Mock pathlib.Path
-        path_mock = Mock()
+        path_mock = MagicMock()  # MagicMock allows to override __enter__ for context managers
         path_mock.exists.return_value = True
-        path_mock.open.return_value = valid_file_content
+        path_mock.open.return_value = path_mock
+        path_mock.__enter__.return_value = valid_file_content
 
         # When
         result = RGBDCameraModel.load_from_yaml(path_mock)
@@ -80,9 +82,10 @@ class TestRGBDCameraModel:
         })
 
         # Mock pathlib.Path
-        path_mock = Mock()
+        path_mock = MagicMock()  # MagicMock allows to override __enter__ for context managers
         path_mock.exists.return_value = True
-        path_mock.open.return_value = not_valid_file_content
+        path_mock.open.return_value = path_mock
+        path_mock.__enter__.return_value = not_valid_file_content
 
         # When
         result = RGBDCameraModel.load_from_yaml(path_mock)
@@ -185,11 +188,11 @@ class TestRGBDCameraModel:
         # Given
         camera_model = RGBDCameraModel.load_from_yaml(load_camera_intrinsics_file)
 
-        gray_images, depth_images, _ = load_single_benchmark_case
+        gray_images, depth_images, transforms = load_single_benchmark_case
         gray_image = gray_images[0]
         depth_image = depth_images[0]
 
-        camera_pose = np.zeros((6, 1), dtype=np.float32)
+        camera_pose = SE3.log(transforms[0])
 
         # When
         pointcloud, mask = camera_model.deproject(depth_image=depth_image, camera_pose=camera_pose, return_mask=True)
@@ -201,4 +204,8 @@ class TestRGBDCameraModel:
             x=projected_points[0], y=projected_points[1], image=gray_image, cast=True
         )
 
-        np.testing.assert_allclose(gray_image[mask], projected_image[mask], atol=2.0)
+        # NOTE: By the current implementation (17/04/2022) of 'Interp2D.bilinear' if we give the exact grid to retrieve
+        # the same image, then last row and last column will be 0.0
+        np.testing.assert_allclose(
+            gray_image[:-1, :-1][mask[:-1, :-1]], projected_image[:-1, :-1][mask[:-1, :-1]], atol=1.0
+        )

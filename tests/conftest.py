@@ -24,7 +24,7 @@ def _load_depth_image(filepath: str):
 
 @pytest.fixture
 def load_camera_intrinsics_file():
-    filepath = _TEST_DATADIR / "test_camera_intrinsics.yaml"
+    filepath = _TEST_DATADIR / "camera_intrinsics.yaml"
     return filepath
 
 

@@ -259,10 +259,10 @@ class KerlDVO(BaseDenseVisualOdometry):
             H = np.dot(jacobian_t, jacobian)
             b = - np.dot(jacobian_t, residuals)
 
-            L = np.linalg.cholesky(H)
-            y = np.linalg.solve(L.T, b)
-            delta_xi = np.linalg.solve(L, y)
-            # delta_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
+            # L = np.linalg.cholesky(H)
+            # y = np.linalg.solve(L.T, b)
+            # delta_xi = np.linalg.solve(L, y)
+            delta_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
 
             # Update
             xi = SE3.log(np.dot(SE3.exp(xi), SE3.exp(delta_xi)))

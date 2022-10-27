@@ -81,7 +81,7 @@ class TestDVO:
         gray_images, depth_images, transformations = load_single_benchmark_case
         camera_model = RGBDCameraModel.load_from_yaml(load_camera_intrinsics_file)
 
-        dvo = KerlDVO(camera_model, np.zeros((6, 1), dtype=np.float32), 1)
+        dvo = KerlDVO(camera_model, SE3.log(transformations[0]), 5)
 
         # when
         result = dvo._find_optimal_transformation(
@@ -89,5 +89,5 @@ class TestDVO:
         )
 
         # Then
-        expected_result = SE3.log(transformations[1]) - SE3.log(transformations[0])
-        np.testing.assert_allclose(result, expected_result)
+        expected_result = SE3.log(np.dot(SE3.inverse(transformations[1]), transformations[0]))
+        np.testing.assert_allclose(result, expected_result, atol=0.02)
