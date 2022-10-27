@@ -15,7 +15,7 @@ from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
 from dense_visual_odometry.log import set_root_logger
 from dense_visual_odometry.camera_model import RGBDCameraModel
 
-from test_dvo import load_benchmark
+from test_dvo import load_benchmark, _SUPPORTED_BENCHMARKS
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,7 @@ def parse_arguments():
     benchmark_parser = subparsers.add_parser(
         "benchmark", parents=[parent_parser], help="Visualize from a benchmark dir"
     )
+    benchmark_parser.add_argument("type", type=str, choices=_SUPPORTED_BENCHMARKS, help="Type of benchmark to load")
     benchmark_parser.add_argument("-d", "--data-path", type=str, help="Path to benchmark dir", default=None)
 
     args = parser.parse_args()
@@ -65,7 +66,7 @@ def parse_arguments():
             if not data.is_dir():
                 raise ValueError("Could not find benchmark dir at '{}'".format(str(data)))
 
-        transforms, rgb_images, depth_images, camera_model, _ = load_benchmark(data)
+        transforms, rgb_images, depth_images, camera_model, _ = load_benchmark(args.type, data)
 
     return transforms, rgb_images, depth_images, camera_model, args.plot_trajectory, args.absolute
 
