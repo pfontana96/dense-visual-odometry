@@ -28,15 +28,19 @@ def parse_arguments():
     parser.add_argument("benchmark", type=str, choices=_SUPPORTED_BENCHMARKS, help="Benchmark to run")
     parser.add_argument("-d", "--data-dir", type=str, help="Path to data", default=None)
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument(
+        "-s", "--size", type=int, default=None,
+        help="Number of data samples to use (first 'size' samples are selected)"
+    )
 
     args = parser.parse_args()
 
     set_root_logger(verbose=args.verbose)
 
-    return load_benchmark(type=args.benchmark, data_dir=args.data_dir)
+    return load_benchmark(type=args.benchmark, data_dir=args.data_dir, size=args.size)
 
 
-def load_benchmark(type: str, data_dir: str = None):
+def load_benchmark(type: str, data_dir: str = None, size: int = None):
     if type == "tum-fr1":
         if data_dir is None:
             raise ValueError("When running 'tum-fr1' path to data (-d) should be specified")
@@ -48,16 +52,28 @@ def load_benchmark(type: str, data_dir: str = None):
 
         camera_intrinsics_file = Path(__file__).resolve().parent.parent / "tests/test_data/camera_intrinsics.yaml"
 
-        return _load_tum_benchmark(data_path=data_dir, camera_intrinsics_file=camera_intrinsics_file)
+        gt_transforms, rgb_images, depth_images, camera_model, additional_info = _load_tum_benchmark(
+            data_path=data_dir, camera_intrinsics_file=camera_intrinsics_file
+        )
 
     elif type == "test":
         if data_dir is not None:
             data_dir = Path(data_dir).resolve()
 
-            return _load__test_benchmark(data_path=data_dir)
+            gt_transforms, rgb_images, depth_images, camera_model, additional_info = _load__test_benchmark(
+                data_path=data_dir
+            )
 
         else:
-            return _load__test_benchmark()
+            gt_transforms, rgb_images, depth_images, camera_model, additional_info = _load__test_benchmark()
+
+    if (size is not None) and (size <= len(gt_transforms)):
+        logger.info("Using first '{}' data samples".format(size))
+        gt_transforms = gt_transforms[0:size]
+        rgb_images = rgb_images[0:size]
+        depth_images = depth_images[0:size]
+
+    return gt_transforms, rgb_images, depth_images, camera_model, additional_info
 
 
 def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path):

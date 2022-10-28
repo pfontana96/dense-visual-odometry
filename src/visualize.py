@@ -9,7 +9,6 @@ import copy
 import numpy as np
 import cv2
 import open3d as o3d
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
@@ -34,6 +33,11 @@ def parse_arguments():
         "-a", "--absolute", action="store_true",
         help="Bool flag indicating if transforms are absolute or relative to previous one"
     )
+    parent_parser.add_argument(
+        "-s", "--size", type=int, default=None,
+        help="Number of data samples to use (first 'size' samples are selected)"
+    )
+    parent_parser.add_argument("-f", "--fps", type=int, default=5, help="fps to use in animation")
 
     report_parser = subparsers.add_parser(
         "report", parents=[parent_parser], help="Visualize from a JSON report generated"
@@ -67,9 +71,9 @@ def parse_arguments():
             if not data.is_dir():
                 raise ValueError("Could not find benchmark dir at '{}'".format(str(data)))
 
-        transforms, rgb_images, depth_images, camera_model, _ = load_benchmark(args.type, data)
+        transforms, rgb_images, depth_images, camera_model, _ = load_benchmark(args.type, data, args.size)
 
-    return transforms, rgb_images, depth_images, camera_model, args.plot_trajectory, args.absolute
+    return transforms, rgb_images, depth_images, camera_model, args.plot_trajectory, args.absolute, args.fps
 
 
 def load_from_report(report_path: Path):
@@ -106,26 +110,11 @@ def main():
 
     set_root_logger(verbose=False)
 
-    transformations, rgb_images, depth_images, camera_model, plot_t, absolute = parse_arguments()
+    transformations, rgb_images, depth_images, camera_model, plot_t, absolute, fps = parse_arguments()
 
-    animate3d(rgb_images, depth_images, transformations, camera_model, absolute_transforms=absolute, fps=10)
+    animate3d(rgb_images, depth_images, transformations, camera_model, absolute_transforms=absolute, fps=fps)
 
     if plot_t:
-    #     transformations = np.hstack(transformations)
-
-    #     _, axs = plt.subplots(2, 3)
-    #     x = np.arange(transformations[0, :].size)
-
-    #     axs[0, 0].set_title("X")
-    #     axs[0, 0].plot(x, transformations[0, :])
-
-    #     axs[0, 1].set_title("Y")
-    #     axs[0, 1].plot(x, transformations[1, :])
-
-    #     axs[0, 2].set_title("Z")
-    #     axs[0, 2].plot(x, transformations[2, :])
-
-    # plt.show()
         plot_trajectory(transformations, absolute_transforms=absolute)
 
 
@@ -198,7 +187,7 @@ def plot_trajectory(transforms: List[np.ndarray], absolute_transforms: bool):
 
     o3d.visualization.get_render_option
     o3d.visualization.draw_geometries([lineset])
-    
+
 
 if __name__ == "__main__":
     main()

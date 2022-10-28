@@ -1,5 +1,5 @@
 import logging
-from typing import OrderedDict, Type
+from typing import Type
 
 import numpy as np
 
@@ -114,29 +114,39 @@ class KerlDVO(BaseDenseVisualOdometry):
         )
 
         # Transform pointcloud using estimated rigid motion, i.e. `transformation`
-        if transformation.shape == (4, 4):
-            transformation = SE3.log(transformation)
+        if transformation.shape == (6, 1):
+            transformation = SE3.exp(transformation)
 
-        warped_pixels = self._camera_model.project(pointcloud, transformation)
-        logger.debug("Warped Pixels shape: {}".format(warped_pixels.shape))
+        pointcloud = np.dot(transformation, pointcloud)
+
+        warped_pixels = self._camera_model.project(pointcloud, np.zeros((6, 1), dtype=np.float32))
 
         # Interpolate intensity values for warped pixels projected coordinates
         new_gray_image = np.zeros_like(gray_image_prev, dtype=np.float32)
         new_gray_image[mask] = Interp2D.bilinear(warped_pixels[0], warped_pixels[1], gray_image)
 
+        # NOTE: By the current implementation (17/04/2022) of 'Interp2D.bilinear' if we give the exact grid to retrieve
+        # the same image, then last row and last column will be 0.0
         residuals = np.zeros_like(gray_image_prev, dtype=np.float32)
         residuals[mask] = new_gray_image[mask] - gray_image_prev[mask]
+
+        # Compute Jacobian
+        jacobian = self._compute_jacobian(
+            image=gray_image_prev, pointcloud=pointcloud, mask=mask
+        )
+
         logger.debug(f"Residuals (min, max, mean): ({residuals.min()}, {residuals.max()}, {residuals.mean()})")
 
         if not keep_dims:
             residuals = residuals[mask].reshape(-1, 1)
 
         elif return_mask:
-            return (residuals, mask)
+            return (residuals, jacobian, mask)
 
-        return residuals
+        return residuals, jacobian
 
-    def _compute_jacobian(self, image: np.ndarray, depth_image: np.ndarray, camera_pose: np.ndarray):
+    # TODO: Fix documentation
+    def _compute_jacobian(self, image: np.ndarray, pointcloud: np.ndarray, mask: np.ndarray):
         """
             Computes the jacobian of an image with respect to a camera pose as: `J = Jl*Jw` where `Jl` is a Nx2 matrix
             containing the gradiends of `image` along the x and y directions and `Jw` is a 2x6 matrix containing the
@@ -157,10 +167,6 @@ class KerlDVO(BaseDenseVisualOdometry):
         J : np.ndarray
             NX6 array containing the jacobian of `image` with respect to the six parameters of `camera_pose`
         """
-        pointcloud, mask = self._camera_model.deproject(
-            depth_image=depth_image, camera_pose=camera_pose, return_mask=True
-        )
-
         J_w = compute_jacobian_of_warp_function(
             pointcloud=pointcloud, calibration_matrix=self._camera_model._intrinsics
         )
@@ -226,34 +232,20 @@ class KerlDVO(BaseDenseVisualOdometry):
         err_prev = np.finfo("float32").max
         xi = init_guess
 
-        # Compute Jacobian
-        jacobian_at_initguess = self._compute_jacobian(
-            image=gray_image_prev, depth_image=depth_image_prev, camera_pose=xi
-        )
-        jacobian_t = jacobian_at_initguess.T
-
-        additional_information = OrderedDict()
-
-        error_increased_count = 0
-        end_cause = KerlDVO._MAX_ITERATIONS_EXCEEDED
-
         for i in range(max_iter):
             # Compute residuals
-            residuals, mask = self._compute_residuals(
+            residuals, jacobian = self._compute_residuals(
                 gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
-                transformation=xi, keep_dims=True, return_mask=True
+                transformation=xi, keep_dims=False
             )
-            residuals = residuals[mask].reshape(-1, 1)
+            jacobian_t = jacobian.T
 
             # Computes weights if required
             if self._weighter is not None:
 
                 weights = self._weighter.weight(residuals=residuals)
                 residuals = np.sqrt(weights) * residuals
-                jacobian = np.sqrt(weights) * jacobian_at_initguess
-
-            else:
-                jacobian = jacobian_at_initguess
+                jacobian = np.sqrt(weights) * jacobian
 
             # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
             H = np.dot(jacobian_t, jacobian)
@@ -264,33 +256,32 @@ class KerlDVO(BaseDenseVisualOdometry):
             # delta_xi = np.linalg.solve(L, y)
             delta_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
 
-            # Update
-            xi = SE3.log(np.dot(SE3.exp(xi), SE3.exp(delta_xi)))
-
             err = np.sqrt(np.mean(residuals ** 2))
+            err_diff = err - err_prev
 
-            logger.debug("Iteration {} -> error: {:.4f}".format(i, err))
+            logger.debug("Iteration {} -> error: {:.4f}".format(i + 1, err))
 
             # Stopping criteria (as shown on paper, error function always displays a global minima)
-            if (err > err_prev):
-                error_increased_count += 1
+            if err_diff > 0.0:
+                # error_increased_count += 1
 
-                if error_increased_count > max_allowed_error_increase_steps:
-                    end_cause = KerlDVO._ERROR_INCREASED_ON_ITERATION
-                    logger.warning("Error increased, stopping iterations")
-                    break
-            else:
-                error_increased_count = 0
+                # if error_increased_count > max_allowed_error_increase_steps:
+                #     end_cause = KerlDVO._ERROR_INCREASED_ON_ITERATION
+                #     logger.warning("Error increased, stopping iterations")
+                #     break
 
-            if np.abs(err - err_prev) < tolerance:
-                end_cause = KerlDVO._SUCCESS
+                # Error increse, we keep last estimate and try best luck in next pyramid level
+                logger.warning("Error increased on iteration {}, breaking out..".format(i + 1))
+                break
+
+            elif abs(err_diff) < tolerance:
+                logger.info("Found convergence on iteration {}".format(i + 1))
                 break
 
             err_prev = err
 
-        if return_additional_info:
-            additional_information.update({"end": end_cause})
-            xi = (xi, additional_information)
+            # Update
+            xi = SE3.log(np.dot(SE3.exp(delta_xi), SE3.exp(xi)))
 
         return xi
 
@@ -301,7 +292,7 @@ class KerlDVO(BaseDenseVisualOdometry):
     ):
         # Create coarse to fine Image Pyramids
         image_pyramids = CoarseToFineMultiImagePyramid(
-            images=[gray_image, self.gray_image_prev, self.depth_image_prev],
+            images=[gray_image, self._gray_image_prev, self._depth_image_prev],
             levels=self.levels
         )
 
@@ -315,5 +306,6 @@ class KerlDVO(BaseDenseVisualOdometry):
 
         # Clean cache
         self._camera_model.deproject.cache_clear()
+        self._camera_model.project.cache_clear()
 
         return transformation

@@ -1,5 +1,6 @@
 from typing import Type
 import abc
+from pathlib import Path
 
 import numpy as np
 import cv2
@@ -15,7 +16,7 @@ class BaseDenseVisualOdometry(abc.ABC):
     """
     def __init__(
         self, camera_model: RGBDCameraModel, weighter: Type[BaseWeighter] = None,
-        initial_pose: np.array = np.zeros((6, 1), dtype=np.float32)
+        initial_pose: np.array = np.zeros((6, 1), dtype=np.float32), debug_dir: Path = None
     ):
         self._camera_model = camera_model
 
@@ -29,11 +30,15 @@ class BaseDenseVisualOdometry(abc.ABC):
             raise ValueError("Expected 'initial_pose' to have shape either (4, 4) or (6, 1) go '{}' instead".format(
                 initial_pose.shape
             ))
+
         self._current_pose = self._initial_pose.copy()
+        self._last_pose = None
 
         # We need to save the last frame on memory
-        self.gray_image_prev = None
-        self.depth_image_prev = None
+        self._gray_image_prev = None
+        self._depth_image_prev = None
+
+        self._debug_dir = debug_dir
 
     @abc.abstractmethod
     def _step(
@@ -48,7 +53,7 @@ class BaseDenseVisualOdometry(abc.ABC):
     ):
         gray_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
 
-        if (self.gray_image_prev is None) and (self.depth_image_prev is None):
+        if (self._gray_image_prev is None) and (self._depth_image_prev is None):
             # First frame
             transform = np.zeros((6, 1), dtype=np.float32)
 
@@ -63,8 +68,8 @@ class BaseDenseVisualOdometry(abc.ABC):
         # pose (ergo {t}_to_{world}) will be:
         # current_pose = {t-1}_to_{world} * {t}_to_{t-1} = {t-1}_to_{world} * ({t-1}_to_{t})^(-1)
         self._current_pose = SE3.log(np.dot(SE3.exp(self._current_pose), SE3.inverse(SE3.exp(transform))))
-        self.gray_image_prev = gray_image
-        self.depth_image_prev = depth_image
+        self._gray_image_prev = gray_image
+        self._depth_image_prev = depth_image
 
         return transform
 
