@@ -156,7 +156,10 @@ def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path):
     camera_model = RGBDCameraModel.load_from_yaml(camera_intrinsics_file)
 
     # Additional data needed for report
-    additional_info = {"rgb": rgb_images_paths.tolist(), "depth": depth_images_paths.tolist()}
+    additional_info = {
+        "rgb": rgb_images_paths.tolist(), "depth": depth_images_paths.tolist(),
+        "camera_intrinsics": str(camera_intrinsics_file)
+    }
 
     return gt_transforms, rgb_images, depth_images, camera_model, additional_info
 
