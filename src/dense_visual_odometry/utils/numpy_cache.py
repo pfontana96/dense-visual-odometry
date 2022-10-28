@@ -9,7 +9,7 @@ def np_cache(function: Callable):
         containing either `*args` or `**kwargs` being 2D numpy arrays and won't work for arrays with different
         dimensions. See: https://stackoverflow.com/questions/52331944/cache-decorator-for-numpy-arrays
     """
-    @lru_cache(maxsize=None, typed=False)
+    @lru_cache(maxsize=10, typed=False)
     def cached_wrapper(*args, **kwargs):
         np_args_index = kwargs.pop("numpy_args_index")
         np_kwargs_keys = kwargs.pop("numpy_args_keys")

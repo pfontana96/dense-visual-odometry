@@ -84,7 +84,7 @@ class SE3(BaseSpecialGroup):
 
         # Check for singularity at 0 deg rotation
         if theta < _LIE_EPSILON:
-            logger.warning("Singular rotation (i.e 'theta' = 0)")
+            logger.debug("Singular rotation (i.e 'theta' = 0)")
             T[:3, 3] = xi[:3, 0]
 
         else:
