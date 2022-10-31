@@ -118,12 +118,14 @@ class RGBDCameraModel:
 
         # Remove invalid points
         mask = z != 0.0
-        z = z[mask]
+        z = z[mask].astype(np.float32)
 
         # Compute sensor grid
         # TODO: Use a more efficient way of creating pointcloud -> Several pixels values are repeated. See `sparse`
         # parameter of `np.meshgrid`
-        x_pixel, y_pixel = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
+        x_pixel, y_pixel = np.meshgrid(
+            np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32), copy=False
+        )
         x_pixel = x_pixel.reshape(-1)
         y_pixel = y_pixel.reshape(-1)
 

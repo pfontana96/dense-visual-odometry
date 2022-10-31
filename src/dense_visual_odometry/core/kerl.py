@@ -177,7 +177,7 @@ class KerlDVO(BaseDenseVisualOdometry):
         gradx = gradx[mask]
         grady = grady[mask]
 
-        J = np.zeros((gradx.size, 6))
+        J = np.zeros((gradx.size, 6), dtype=np.float32)
         for i, gradients in enumerate(np.hstack((gradx.reshape(-1, 1), grady.reshape(-1, 1)))):
             J[i] = np.dot(gradients.reshape(1, 2), J_w[i])
 
