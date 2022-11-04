@@ -1,5 +1,4 @@
 import numpy as np
-import cv2
 import logging
 import pytest
 
@@ -24,7 +23,7 @@ class TestImagePyramid(TestCase):
     def inject_fixtures(self, caplog):
         self._caplog = caplog
 
-    @patch("cv2.pyrDown")
+    @patch("dense_visual_odometry.utils.image_pyramid.pyrDownMedianSmooth")
     def test__given_a_image_and_levels__when_init__then_called_right_amount(self, pyrdown_mock):
 
         # Given
@@ -91,20 +90,6 @@ class TestImagePyramid(TestCase):
         with self._caplog.at_level(logging.ERROR):
             with self.assertRaises(IndexError):
                 _ = pyramid[level]
-
-    def test__given_a_valid_level__when_get__then_ok(self):
-
-        # Given
-        level = 2
-        pyramid = ImagePyramid(self.image, 4)
-
-        # When
-        with self._caplog.at_level(logging.ERROR):
-            result = pyramid[level]
-
-        # Then
-        np.testing.assert_equal(result, cv2.pyrDown(cv2.pyrDown(self.image)))
-        self.assertEqual(self._caplog.records, [])  # No errors logged
 
 
 class TestCoarseToFineMultiImagePyramid(TestCase):

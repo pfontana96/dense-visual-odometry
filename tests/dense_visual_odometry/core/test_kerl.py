@@ -27,7 +27,8 @@ class TestDVO:
         # When
         dvo = KerlDVO(self.perfect_camera_model, np.zeros((6, 1), dtype=np.float32), 1)
         residuals, _ = dvo._compute_residuals(
-            gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32), keep_dims=False, return_mask=True
+            gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32), keep_dims=False, return_mask=True,
+            compute_jacobian=False
         )  # return_mask should be ignored
 
         # Then
