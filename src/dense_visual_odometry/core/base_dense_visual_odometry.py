@@ -16,7 +16,7 @@ class BaseDenseVisualOdometry(abc.ABC):
     """
     def __init__(
         self, camera_model: RGBDCameraModel, weighter: Type[BaseWeighter] = None,
-        initial_pose: np.array = np.zeros((6, 1), dtype=np.float32), debug_dir: Path = None
+        initial_pose: np.array = np.zeros((6, 1), dtype=np.float32), max_distance: float = 5.0, debug_dir: Path = None
     ):
         self._camera_model = camera_model
 
@@ -33,6 +33,8 @@ class BaseDenseVisualOdometry(abc.ABC):
 
         self._current_pose = self._initial_pose.copy()
         self._last_pose = None
+
+        self._max_distance = max_distance
 
         # We need to save the last frame on memory
         self._gray_image_prev = None
@@ -52,6 +54,7 @@ class BaseDenseVisualOdometry(abc.ABC):
         init_guess: np.ndarray = np.zeros((6, 1), dtype=np.float32), **kwargs
     ):
         gray_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
+        depth_image[(depth_image * self._camera_model.depth_scale) > self._max_distance] = 0  # Possible noisy points
 
         if (self._gray_image_prev is None) and (self._depth_image_prev is None):
             # First frame

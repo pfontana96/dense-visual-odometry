@@ -37,13 +37,6 @@ class KerlDVO(BaseDenseVisualOdometry):
     .. [1] Kerl, C., Sturm, J., Cremers, D., "Robust Odometry Estimation for RGB-D Cameras"
     """
 
-    # Class constatnts
-
-    # Step end causes
-    _ERROR_INCREASED_ON_ITERATION = 0x1
-    _MAX_ITERATIONS_EXCEEDED = 0x2
-    _SUCCESS = 0x3
-
     def __init__(
         self, camera_model: RGBDCameraModel, initial_pose: np.ndarray, levels: int, weighter: Type[BaseWeighter] = None
     ):
@@ -116,6 +109,12 @@ class KerlDVO(BaseDenseVisualOdometry):
             depth_image_prev, np.zeros((6, 1), dtype=np.float32), return_mask=True, level=level
         )
 
+        # Compute Jacobian at identity
+        if compute_jacobian:
+            jacobian = self._compute_jacobian(
+                image=gray_image_prev, pointcloud=pointcloud, mask=mask
+            )
+
         # Transform pointcloud using estimated rigid motion, i.e. `transformation`
         if transformation.shape == (6, 1):
             transformation = SE3.exp(transformation)
@@ -132,12 +131,6 @@ class KerlDVO(BaseDenseVisualOdometry):
         # the same image, then last row and last column will be 0.0
         residuals = np.zeros_like(gray_image_prev, dtype=np.float32)
         residuals[mask] = new_gray_image[mask] - gray_image_prev[mask]
-
-        # Compute Jacobian
-        if compute_jacobian:
-            jacobian = self._compute_jacobian(
-                image=gray_image_prev, pointcloud=pointcloud, mask=mask
-            )
 
         logger.debug(f"Residuals (min, max, mean): ({residuals.min()}, {residuals.max()}, {residuals.mean()})")
 
@@ -238,12 +231,12 @@ class KerlDVO(BaseDenseVisualOdometry):
         for i in range(max_iter):
             # Compute residuals
             if i == 0:
-                # Compute Jacobian at init guess
-                residuals, jacobian_at_init = self._compute_residuals(
+                # Compute Jacobian at identity
+                residuals, jacobian_at_identity = self._compute_residuals(
                     gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
                     transformation=xi, keep_dims=False, level=level
                 )
-                jacobian_t = jacobian_at_init.T
+                jacobian_t = jacobian_at_identity.T
 
             else:
                 (residuals, ) = self._compute_residuals(
@@ -256,10 +249,10 @@ class KerlDVO(BaseDenseVisualOdometry):
 
                 weights = self._weighter.weight(residuals=residuals)
                 residuals = np.sqrt(weights) * residuals
-                jacobian = np.sqrt(weights) * jacobian_at_init
+                jacobian = np.sqrt(weights) * jacobian_at_identity
 
             else:
-                jacobian = jacobian_at_init
+                jacobian = jacobian_at_identity
 
             # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
             H = np.dot(jacobian_t, jacobian)
@@ -270,7 +263,7 @@ class KerlDVO(BaseDenseVisualOdometry):
             # delta_xi = np.linalg.solve(L, y)
             delta_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
 
-            err = np.sqrt(np.mean(residuals ** 2))
+            err = np.mean(residuals ** 2)
             err_diff = err - err_prev
 
             logger.debug("Iteration {} -> error: {:.4f}".format(i + 1, err))
@@ -297,11 +290,14 @@ class KerlDVO(BaseDenseVisualOdometry):
             # Update
             xi = SE3.log(np.dot(SE3.exp(delta_xi), SE3.exp(xi)))
 
+            if i == (max_iter - 1):
+                logger.warning("Exceeded maximum number of iterations ({})".format(max_iter))
+
         return xi
 
     def _step(
         self, gray_image: np.ndarray, depth_image: np.ndarray,
-        init_guess: np.ndarray = np.zeros((6, 1), dtype=np.float32), max_iter: int = 100, tolerance: float = 1e-6
+        init_guess: np.ndarray = np.zeros((6, 1), dtype=np.float32), max_iter: int = 100, tolerance: float = 1e-6,
     ):
         # Create coarse to fine Image Pyramids
         image_pyramids = CoarseToFineMultiImagePyramid(

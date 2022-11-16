@@ -135,8 +135,13 @@ def animate3d(
     pcd = o3d.geometry.PointCloud()
     camera_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.3)
 
+    max_distance = 5  # [m]
+
     for i, (rgb_image, depth_image, transform) in enumerate(zip(rgb_images, depth_images, transforms)):
         start = time.time()
+
+        # Filter noisy points of sensor
+        depth_image[(depth_image * camera_model.depth_scale) > max_distance] = 0
 
         pointcloud_xyz, mask = camera_model.deproject(depth_image=depth_image, camera_pose=transform, return_mask=True)
         pointcloud_colors = rgb_image[mask]
