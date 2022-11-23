@@ -1,9 +1,11 @@
 import logging
+from typing import Type
 
 import numpy as np
-import cv2
 
-from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
+from dense_visual_odometry.core.base_dense_visual_odometry import BaseDenseVisualOdometry
+from dense_visual_odometry.utils.image_pyramid import CoarseToFineMultiImagePyramid
+from dense_visual_odometry.utils.lie_algebra import SE3
 from dense_visual_odometry.utils.interpolate import Interp2D
 from dense_visual_odometry.utils.jacobian import compute_jacobian_of_warp_function, compute_gradients
 from dense_visual_odometry.camera_model import RGBDCameraModel
@@ -13,15 +15,15 @@ from dense_visual_odometry.weighter.base_weighter import BaseWeighter
 logger = logging.getLogger(__name__)
 
 
-class DenseVisualOdometry:
+class KerlDVO(BaseDenseVisualOdometry):
     """
-        Class for performing dense visual odometry
+        Class for performing dense visual odometry by minimizing the photometric error (see [1]_).
 
     Attributes
     ----------
     camera_model : dense_visual_odometry.camera_model.RGBDCameraModel
         Camera model used
-     initial_pose : np.ndarray
+    initial_pose : np.ndarray
             Initial camera pose w.r.t the World coordinate frame expressed as a 6x1 se(3) vector
     weighter : BaseWeighter | None, optional
         Weighter functions to apply on residuals to remove dynamic object. If None, then no weighting is applied
@@ -29,9 +31,15 @@ class DenseVisualOdometry:
         Previous frame's grayscale image
     depth_image_prev : np.ndarray
         Previous frame's depth image
+
+    Notes
+    ----------
+    .. [1] Kerl, C., Sturm, J., Cremers, D., "Robust Odometry Estimation for RGB-D Cameras"
     """
 
-    def __init__(self, camera_model: RGBDCameraModel, initial_pose: np.ndarray, weighter: BaseWeighter = None):
+    def __init__(
+        self, camera_model: RGBDCameraModel, initial_pose: np.ndarray, levels: int, weighter: Type[BaseWeighter] = None
+    ):
         """
         Parameters
         ----------
@@ -39,22 +47,19 @@ class DenseVisualOdometry:
             Camera model used
         initial_pose : np.ndarray
             Initial camera pose w.r.t the World coordinate frame expressed as a 6x1 se(3) vector
+        levels : int
+            Pyramid octaves to use
         weighter : BaseWeighter | None, optional
             Weighter functions to apply on residuals to remove dynamic object. If None, then no weighting is applied
         """
-        self.camera_model = camera_model
-        self.initial_pose = initial_pose
+        super(KerlDVO, self).__init__(camera_model=camera_model, initial_pose=initial_pose, weighter=weighter)
+        self.levels = levels
 
-        self.current_pose = initial_pose.copy()
-
-        # We need to save the last frame on memory
-        self.gray_image_prev = None
-        self.depth_image_prev = None
-
-        self.weighter = weighter
-
-    def _compute_residuals(self, gray_image: np.ndarray, gray_image_prev: np.ndarray, depth_image_prev: np.ndarray,
-                           transformation: np.ndarray, keep_dims: bool = True, return_mask: bool = False):
+    def _compute_residuals(
+        self, gray_image: np.ndarray, gray_image_prev: np.ndarray, depth_image_prev: np.ndarray,
+        transformation: np.ndarray, keep_dims: bool = True, return_mask: bool = False, level: int = 0,
+        compute_jacobian: bool = True
+    ):
         """
             Deprojects `depth_image_prev` into a 3d space, then it transforms this pointcloud using the estimated
             `transformation` between the 2 different camera poses and projects this pointcloud back to an
@@ -100,33 +105,50 @@ class DenseVisualOdometry:
 
         # Deproject image into 3d space w.r.t the first camera position
         # NOTE: Assuming origin is first camera position
-        pointcloud, mask = self.camera_model.deproject(depth_image_prev, np.zeros((6, 1), dtype=np.float32),
-                                                       return_mask=True)
+        pointcloud, mask = self._camera_model.deproject(
+            depth_image_prev, np.zeros((6, 1), dtype=np.float32), return_mask=True, level=level
+        )
+
+        # Compute Jacobian at identity
+        if compute_jacobian:
+            jacobian = self._compute_jacobian(
+                image=gray_image_prev, pointcloud=pointcloud, mask=mask
+            )
 
         # Transform pointcloud using estimated rigid motion, i.e. `transformation`
-        if transformation.shape == (4, 4):
-            transformation = SE3.log(transformation)
+        if transformation.shape == (6, 1):
+            transformation = SE3.exp(transformation)
 
-        warped_pixels = self.camera_model.project(pointcloud, transformation)
-        logger.debug("Warped Pixels shape: {}".format(warped_pixels.shape))
+        pointcloud = np.dot(transformation, pointcloud)
+
+        warped_pixels = self._camera_model.project(pointcloud, np.zeros((6, 1), dtype=np.float32), level=level)
 
         # Interpolate intensity values for warped pixels projected coordinates
         new_gray_image = np.zeros_like(gray_image_prev, dtype=np.float32)
         new_gray_image[mask] = Interp2D.bilinear(warped_pixels[0], warped_pixels[1], gray_image)
 
+        # NOTE: By the current implementation (17/04/2022) of 'Interp2D.bilinear' if we give the exact grid to retrieve
+        # the same image, then last row and last column will be 0.0
         residuals = np.zeros_like(gray_image_prev, dtype=np.float32)
         residuals[mask] = new_gray_image[mask] - gray_image_prev[mask]
+
         logger.debug(f"Residuals (min, max, mean): ({residuals.min()}, {residuals.max()}, {residuals.mean()})")
 
         if not keep_dims:
             residuals = residuals[mask].reshape(-1, 1)
 
-        elif return_mask:
-            return (residuals, mask)
+        result = (residuals, )
 
-        return residuals
+        if compute_jacobian:
+            result += (jacobian, )
 
-    def _compute_jacobian(self, image: np.ndarray, depth_image: np.ndarray, camera_pose: np.ndarray):
+        if return_mask:
+            result += (mask, )
+
+        return result
+
+    # TODO: Fix documentation
+    def _compute_jacobian(self, image: np.ndarray, pointcloud: np.ndarray, mask: np.ndarray):
         """
             Computes the jacobian of an image with respect to a camera pose as: `J = Jl*Jw` where `Jl` is a Nx2 matrix
             containing the gradiends of `image` along the x and y directions and `Jw` is a 2x6 matrix containing the
@@ -147,12 +169,8 @@ class DenseVisualOdometry:
         J : np.ndarray
             NX6 array containing the jacobian of `image` with respect to the six parameters of `camera_pose`
         """
-        pointcloud, mask = self.camera_model.deproject(
-            depth_image=depth_image, camera_pose=camera_pose, return_mask=True
-        )
-
         J_w = compute_jacobian_of_warp_function(
-            pointcloud=pointcloud, calibration_matrix=self.camera_model.calibration_matrix
+            pointcloud=pointcloud, calibration_matrix=self._camera_model._intrinsics
         )
 
         gradx, grady = compute_gradients(image=image, kernel_size=3)
@@ -161,15 +179,15 @@ class DenseVisualOdometry:
         gradx = gradx[mask]
         grady = grady[mask]
 
-        J = np.zeros((gradx.size, 6))
+        J = np.zeros((gradx.size, 6), dtype=np.float32)
         for i, gradients in enumerate(np.hstack((gradx.reshape(-1, 1), grady.reshape(-1, 1)))):
             J[i] = np.dot(gradients.reshape(1, 2), J_w[i])
 
         return J
 
     def _find_optimal_transformation(
-        self, gray_image: np.ndarray, gray_image_prev: np.ndarray, depth_image_prev: np.ndarray,
-        init_guess: np.ndarray = np.zeros((6, 1), dtype=np.float32), max_iter: int = 100, ratio: float = 0.995
+        self, gray_image: np.ndarray, gray_image_prev: np.ndarray, depth_image_prev: np.ndarray, level: int = 0,
+        init_guess: np.ndarray = np.zeros((6, 1), dtype=np.float32), max_iter: int = 100, tolerance: float = 1e-6
     ):
         """
             Given a pair of grayscale images and the corresponding depth one for the first image on the pair, it
@@ -188,13 +206,15 @@ class DenseVisualOdometry:
             `[[0], [0], [0], [0], [0], [0]]`
         max_iter : int, optional
             Max number of iterations. Defaults to `100`
-        ratio : float, optional
-            Ratio to be used on stopping criteria (D'Alembert criterion). Defaults to `0.995`
+        tolerance : float, optional
+            Tolerance used on stopping criteria. Defaults to `0.000001`
 
         Returns
         -------
         xi : np.ndarray
             Estimated transformation between frames expressed as a se(3) 6x1 array.
+        info : dict, optional
+            Information about the estimated transformation.
 
         Notes
         -----
@@ -207,63 +227,93 @@ class DenseVisualOdometry:
         # Newton-Gauss method
         err_prev = np.finfo("float32").max
         xi = init_guess
+
         for i in range(max_iter):
             # Compute residuals
-            residuals, mask = self._compute_residuals(
-                gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
-                transformation=xi, keep_dims=True, return_mask=True
-            )
-            residuals = residuals[mask].reshape(-1, 1)
+            if i == 0:
+                # Compute Jacobian at identity
+                residuals, jacobian_at_identity = self._compute_residuals(
+                    gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
+                    transformation=xi, keep_dims=False, level=level
+                )
+                jacobian_t = jacobian_at_identity.T
 
-            # Compute Jacobian
-            jacobian = self._compute_jacobian(image=gray_image_prev, depth_image=depth_image_prev, camera_pose=xi)
-            jacobian_t = jacobian.T
+            else:
+                (residuals, ) = self._compute_residuals(
+                    gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
+                    transformation=xi, keep_dims=False, level=level, compute_jacobian=False
+                )
 
             # Computes weights if required
-            weights = self.weighter.weight(residuals=residuals) if self.weighter else np.ones_like(residuals)
+            if self._weighter is not None:
+
+                weights = self._weighter.weight(residuals=residuals)
+                residuals = np.sqrt(weights) * residuals
+                jacobian = np.sqrt(weights) * jacobian_at_identity
+
+            else:
+                jacobian = jacobian_at_identity
 
             # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
-            H = np.dot(jacobian_t, weights * jacobian)
-            b = - np.dot(jacobian_t, weights * residuals)
+            H = np.dot(jacobian_t, jacobian)
+            b = - np.dot(jacobian_t, residuals)
 
+            # L = np.linalg.cholesky(H)
+            # y = np.linalg.solve(L.T, b)
+            # delta_xi = np.linalg.solve(L, y)
             delta_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
 
-            # Update
-            xi = SE3.log(np.dot(SE3.exp(xi), SE3.exp(delta_xi)))
+            err = np.mean(residuals ** 2)
+            err_diff = err - err_prev
 
-            # Stopping criteria (D'Alembert criterion)
-            err = np.sum(weights * residuals ** 2)
+            logger.debug("Iteration {} -> error: {:.4f}".format(i + 1, err))
 
-            logger.debug("Iteration {} -> error: {:.4f}".format(i, err))
+            # Stopping criteria (as shown on paper, error function always displays a global minima)
+            if err_diff > 0.0:
+                # error_increased_count += 1
 
-            if (err / err_prev) > ratio:
-                logger.debug("Found convergence at iteration '{}': xi={}".format(i, xi))
+                # if error_increased_count > max_allowed_error_increase_steps:
+                #     end_cause = KerlDVO._ERROR_INCREASED_ON_ITERATION
+                #     logger.warning("Error increased, stopping iterations")
+                #     break
+
+                # Error increse, we keep last estimate and try best luck in next pyramid level
+                logger.warning("Error increased on iteration {}, breaking out..".format(i + 1))
                 break
 
-            if i == (max_iter - 1):
-                logger.warning("Could not find convergence")
+            elif abs(err_diff) < tolerance:
+                logger.info("Found convergence on iteration {}".format(i + 1))
+                break
 
             err_prev = err
 
+            # Update
+            xi = SE3.log(np.dot(SE3.exp(delta_xi), SE3.exp(xi)))
+
+            if i == (max_iter - 1):
+                logger.warning("Exceeded maximum number of iterations ({})".format(max_iter))
+
         return xi
 
-    def step(self, color_image: np.ndarray, depth_image: np.ndarray, init_guess=np.zeros((6, 1), dtype=np.float32)):
-        gray_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
+    def _step(
+        self, gray_image: np.ndarray, depth_image: np.ndarray,
+        init_guess: np.ndarray = np.zeros((6, 1), dtype=np.float32), max_iter: int = 100, tolerance: float = 1e-6,
+    ):
+        # Create coarse to fine Image Pyramids
+        image_pyramids = CoarseToFineMultiImagePyramid(
+            images=[gray_image, self._gray_image_prev, self._depth_image_prev],
+            levels=self.levels
+        )
 
-        if (self.gray_image_prev is None) and (self.depth_image_prev is None):
-            # First frame
-            transformation = np.zeros((6, 1), dtype=np.float32)
-
-        else:
+        for i, (gray_image, gray_image_prev, depth_image_prev) in enumerate(image_pyramids):
             transformation = self._find_optimal_transformation(
-                gray_image=gray_image, gray_image_prev=self.gray_image_prev, depth_image_prev=self.depth_image_prev,
-                init_guess=init_guess
+                gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
+                init_guess=init_guess, tolerance=tolerance, max_iter=max_iter, level=(i - self.levels + 1)
             )
-
-        # Update
-        self.current_pose = SE3.log(np.dot(SE3.exp(transformation), SE3.exp(self.current_pose)))
-        self.gray_image_prev = gray_image
-        self.depth_image_prev = depth_image
+            init_guess = transformation
 
         # Clean cache
-        self.camera_model.deproject.cache_clear()
+        self._camera_model.deproject.cache_clear()
+        self._camera_model.project.cache_clear()
+
+        return transformation

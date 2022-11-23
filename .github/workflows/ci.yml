@@ -3,10 +3,7 @@ name: CI
 on: [push]
 
 env:
-  IMAGE_NAME: ${{ github.event.repository.name }}
-  IMAGE_TAG: ${{ github.ref_name }}
-  # DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-  # DOCKER_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   Quality:
@@ -16,33 +13,17 @@ jobs:
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9.x
-      - run: pip install flake8
-      - run: python -m flake8
+      - run: pip install tox
+      - run: tox -e quality
 
-  BuildAndPublishImage:
+  Tests:
     needs:
       - Quality
     runs-on: ubuntu-20.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Build image
-        uses: docker/build-push-action@v2
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
         with:
-          context: '.'
-          file: ./Dockerfile
-          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          push: false
-          load: true           
-
-      - name: See locally available images
-        run: docker images
-
-      - name: Run tests on Docker container
-        run: >
-          docker run --rm --env COVERALLS_REPO_TOKEN=${{ secrets.GITHUB_TOKEN }} -i 
-          ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} -c 
-          "python -m pip install pytest pytest-cov coveralls==3.0.1;
-          python -m pytest --cov=src/dense_visual_odometry --cov-report term-missing --color=yes -s tests/dense_visual_odometry;
-          coveralls --service=github"
+          python-version: 3.9.x
+      - run: pip install tox
+      - run: tox -e test
