@@ -1,6 +1,7 @@
+import logging
+
 import cv2
 import numpy as np
-import logging
 
 
 logger = logging.getLogger(__name__)
@@ -8,6 +9,11 @@ logger = logging.getLogger(__name__)
 
 class ImagePyramidError(Exception):
     pass
+
+
+def pyrDownMedianSmooth(image: np.ndarray):
+    out = cv2.medianBlur(image, 3)
+    return out[::2, ::2]  # Drop even rows and columns
 
 
 class ImagePyramid:
@@ -21,8 +27,8 @@ class ImagePyramid:
         try:
             self.pyramid[0] = image
             for level in range(1, self.levels):
-                self.pyramid[level] = cv2.pyrDown(self.pyramid[level - 1])
-        except cv2.error as e:
+                self.pyramid[level] = pyrDownMedianSmooth(self.pyramid[level - 1])
+        except Exception as e:
             logger.error(e)
             raise ImagePyramidError("Could not create Image Pyramid")
 

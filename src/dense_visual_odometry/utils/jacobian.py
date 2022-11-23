@@ -26,9 +26,11 @@ def compute_jacobian_of_warp_function(pointcloud: np.ndarray, calibration_matrix
     y = pointcloud[1, :]
     z = pointcloud[2, :]
 
+    zeros = np.zeros_like(x)
+
     J_w = np.array([
-        [fx / z, np.zeros_like(x), -fx * x / z ** 2, -fx * (x * y) / z ** 2, fx * (1 + (x ** 2 / z ** 2)), -fx * y / z],
-        [np.zeros_like(x), fy / z, -fy * y / z ** 2, -fy * (1 + (y ** 2 / z ** 2)), fy * (x * y) / z ** 2, fy * x / z]
+        [fx / z, zeros, -fx * x / z ** 2, -fx * (x * y) / z ** 2, fx * (1 + (x ** 2 / z ** 2)), -fx * y / z],
+        [zeros, fy / z, -fy * y / z ** 2, -fy * (1 + (y ** 2 / z ** 2)), fy * (x * y) / z ** 2, fy * x / z]
     ], dtype=np.float32)
 
     # Transpose array to be of shape Nx2x6

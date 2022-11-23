@@ -26,8 +26,9 @@ class TestDVO:
 
         # When
         dvo = KerlDVO(self.perfect_camera_model, np.zeros((6, 1), dtype=np.float32), 1)
-        residuals = dvo._compute_residuals(
-            gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32), keep_dims=False, return_mask=True
+        residuals, _ = dvo._compute_residuals(
+            gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32), keep_dims=False, return_mask=True,
+            compute_jacobian=False
         )  # return_mask should be ignored
 
         # Then
@@ -44,13 +45,12 @@ class TestDVO:
 
         # When
         dvo = KerlDVO(self.perfect_camera_model, np.zeros((6, 1), dtype=np.float32), 1)
-        result = dvo._compute_residuals(
+        _, _, mask = dvo._compute_residuals(
             gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32), keep_dims=True, return_mask=True
         )  # return_mask should NOT be ignored
 
         # Then
-        assert isinstance(result, tuple)
-        np.testing.assert_array_equal(result[1], depth_image != 0.0)
+        np.testing.assert_array_equal(mask, depth_image != 0.0)
 
     def test__given_same_image_and_no_transform__when_compute_residuals__then_zero(self):
 
@@ -65,7 +65,7 @@ class TestDVO:
 
         # When
         dvo = KerlDVO(self.perfect_camera_model, np.zeros((6, 1), dtype=np.float32), 1)
-        residuals = dvo._compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32))
+        residuals, _ = dvo._compute_residuals(gray_image, gray_image, depth_image, np.zeros((6, 1), dtype=np.float32))
 
         # Then
         # NOTE: By the current implementation (17/04/2022) of 'Interp2D.bilinear' if we give the exact grid to retrieve

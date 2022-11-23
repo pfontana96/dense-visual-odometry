@@ -28,15 +28,19 @@ def parse_arguments():
     parser.add_argument("benchmark", type=str, choices=_SUPPORTED_BENCHMARKS, help="Benchmark to run")
     parser.add_argument("-d", "--data-dir", type=str, help="Path to data", default=None)
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument(
+        "-s", "--size", type=int, default=None,
+        help="Number of data samples to use (first 'size' samples are selected)"
+    )
 
     args = parser.parse_args()
 
     set_root_logger(verbose=args.verbose)
 
-    return load_benchmark(type=args.benchmark, data_dir=args.data_dir)
+    return load_benchmark(type=args.benchmark, data_dir=args.data_dir, size=args.size)
 
 
-def load_benchmark(type: str, data_dir: str = None):
+def load_benchmark(type: str, data_dir: str = None, size: int = None):
     if type == "tum-fr1":
         if data_dir is None:
             raise ValueError("When running 'tum-fr1' path to data (-d) should be specified")
@@ -48,16 +52,25 @@ def load_benchmark(type: str, data_dir: str = None):
 
         camera_intrinsics_file = Path(__file__).resolve().parent.parent / "tests/test_data/camera_intrinsics.yaml"
 
-        return _load_tum_benchmark(data_path=data_dir, camera_intrinsics_file=camera_intrinsics_file)
+        gt_transforms, rgb_images, depth_images, camera_model, additional_info = _load_tum_benchmark(
+            data_path=data_dir, camera_intrinsics_file=camera_intrinsics_file
+        )
 
     elif type == "test":
         if data_dir is not None:
             data_dir = Path(data_dir).resolve()
 
-            return _load__test_benchmark(data_path=data_dir)
+        gt_transforms, rgb_images, depth_images, camera_model, additional_info = _load__test_benchmark(
+            data_path=data_dir
+        )
 
-        else:
-            return _load__test_benchmark()
+    if (size is not None) and (size <= len(rgb_images)):
+        logger.info("Using first '{}' data samples".format(size))
+        gt_transforms = gt_transforms[0:size]
+        rgb_images = rgb_images[0:size]
+        depth_images = depth_images[0:size]
+
+    return gt_transforms, rgb_images, depth_images, camera_model, additional_info
 
 
 def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path):
@@ -194,12 +207,21 @@ def _load__test_benchmark(data_path: Path = None):
 
     camera_model = RGBDCameraModel.load_from_yaml(data_path / "camera_intrinsics.yaml")
 
+    available_gt = True
     transformations = []
     rgb_images = []
     depth_images = []
     additional_info = {"rgb": [], "depth": [], "camera_intrinsics": str(data_path / "camera_intrinsics.yaml")}
     for value in data.values():
-        transformations.append(SE3.log(np.array(value["transformation"])))
+        if available_gt:
+            try:
+                transformations.append(SE3.log(np.array(value["transformation"])))
+            except KeyError as e:
+                logger.info("Could not find ground truth transform under '{}' at '{}'".format(
+                    e, str(data_path)
+                ))
+                available_gt = False
+
         rgb_images.append(
             cv2.cvtColor(cv2.imread(str(data_path / value["rgb"]), cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB)
         )
@@ -208,13 +230,18 @@ def _load__test_benchmark(data_path: Path = None):
         additional_info["rgb"].append(str(data_path / value["rgb"]))
         additional_info["depth"].append(str(data_path / value["depth"]))
 
+    if not available_gt:
+        transformations = [None] * len(rgb_images)
+
     return transformations, rgb_images, depth_images, camera_model, additional_info
 
 
 def main():
     gt_transforms, rgb_images, depth_images, camera_model, additional_info = parse_arguments()
 
-    dvo = KerlDVO(camera_model=camera_model, initial_pose=gt_transforms[0], levels=5)
+    init_pose = gt_transforms[0] if gt_transforms[0] is not None else np.zeros((6, 1), dtype=np.float32)
+
+    dvo = KerlDVO(camera_model=camera_model, initial_pose=init_pose, levels=3)
 
     steps = []
     errors = []
@@ -225,11 +252,14 @@ def main():
         e = time()
 
         # Error is only the euclidean distance (not taking rotation into account)
-        error = np.linalg.norm(dvo.current_pose[:3] - gt_transform[:3])
+        if gt_transform is not None:
+            error = float(np.linalg.norm(dvo.current_pose[:3] - gt_transform[:3]))
+        else:
+            error = "N/A"
         logger.info("[Frame {} ({:.3f} s)] Error: {} m".format(i + 1, e - s, error))
 
         steps.append(dvo.current_pose.reshape(-1).tolist())
-        errors.append(float(error))
+        errors.append(error)
 
     # Dump results
     report = {"estimated_transformations": steps, "errors": errors}
