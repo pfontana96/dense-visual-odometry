@@ -4,13 +4,9 @@
 # http://asrl.utias.utoronto.ca/~tdb/bib/barfoot_ser17.pdf
 
 import numpy as np
-import logging
 
 from dense_visual_odometry.utils.lie_algebra.base_special_group import BaseSpecialGroup, _LIE_EPSILON
 from dense_visual_odometry.utils.lie_algebra.common import is_rotation_matrix, wrap_angle
-
-
-logger = logging.getLogger(__name__)
 
 
 class SO3(BaseSpecialGroup):
@@ -50,7 +46,6 @@ class SO3(BaseSpecialGroup):
 
         # Check for 0 rad rotation
         if np.abs(theta) < _LIE_EPSILON:
-            logger.debug("Singular rotation (i.e 'theta' = 0)")
             return np.eye(3)
         a = phi / theta
 
@@ -81,7 +76,6 @@ class SO3(BaseSpecialGroup):
         phi = np.zeros((3, 1), dtype=np.float32)
         theta = np.arccos((np.trace(rot_mat) - 1.0) / 2.0)
         if np.abs(theta) < _LIE_EPSILON:
-            logger.debug("Singular rotation (i.e 'theta' = 0)")
             return phi
 
         # Wrap the angle between [-pi;pi]
@@ -117,7 +111,6 @@ class SO3(BaseSpecialGroup):
         # Check for singularity at theta = 0
         if theta < _LIE_EPSILON:
             # Use first order Taylor's expansion
-            logger.debug("Singular rotation (i.e 'theta' = 0)")
             return np.eye(3, dtype=np.float32) + 0.5 * SO3.hat(phi)
 
         sin_theta = np.sin(theta)/theta

@@ -4,14 +4,10 @@
 # http://asrl.utias.utoronto.ca/~tdb/bib/barfoot_ser17.pdf
 
 import numpy as np
-import logging
 
 from dense_visual_odometry.utils.lie_algebra.base_special_group import BaseSpecialGroup, _LIE_EPSILON
 from dense_visual_odometry.utils.lie_algebra.special_orthogonal_group import SO3
 from dense_visual_odometry.utils.lie_algebra.common import wrap_angle
-
-
-logger = logging.getLogger(__name__)
 
 
 class SE3(BaseSpecialGroup):
@@ -84,7 +80,6 @@ class SE3(BaseSpecialGroup):
 
         # Check for singularity at 0 deg rotation
         if theta < _LIE_EPSILON:
-            logger.debug("Singular rotation (i.e 'theta' = 0)")
             T[:3, 3] = xi[:3, 0]
 
         else:

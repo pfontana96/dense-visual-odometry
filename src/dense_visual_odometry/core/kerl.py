@@ -1,15 +1,15 @@
 import logging
-from typing import Type
 
 import numpy as np
+from scipy.interpolate import RegularGridInterpolator
+from scipy.linalg import solve_triangular
 
 from dense_visual_odometry.core.base_dense_visual_odometry import BaseDenseVisualOdometry
 from dense_visual_odometry.utils.image_pyramid import CoarseToFineMultiImagePyramid
 from dense_visual_odometry.utils.lie_algebra import SE3
-from dense_visual_odometry.utils.interpolate import Interp2D
 from dense_visual_odometry.utils.jacobian import compute_jacobian_of_warp_function, compute_gradients
 from dense_visual_odometry.camera_model import RGBDCameraModel
-from dense_visual_odometry.weighter.base_weighter import BaseWeighter
+from dense_visual_odometry.weighter.t_weighter import TDistributionWeighter
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class KerlDVO(BaseDenseVisualOdometry):
     """
 
     def __init__(
-        self, camera_model: RGBDCameraModel, initial_pose: np.ndarray, levels: int, weighter: Type[BaseWeighter] = None
+        self, camera_model: RGBDCameraModel, initial_pose: np.ndarray, levels: int, use_weighter: bool = False
     ):
         """
         Parameters
@@ -52,13 +52,14 @@ class KerlDVO(BaseDenseVisualOdometry):
         weighter : BaseWeighter | None, optional
             Weighter functions to apply on residuals to remove dynamic object. If None, then no weighting is applied
         """
+        weighter = TDistributionWeighter() if use_weighter else None
         super(KerlDVO, self).__init__(camera_model=camera_model, initial_pose=initial_pose, weighter=weighter)
         self.levels = levels
 
+    # TODO: Update doc
     def _compute_residuals(
         self, gray_image: np.ndarray, gray_image_prev: np.ndarray, depth_image_prev: np.ndarray,
-        transformation: np.ndarray, keep_dims: bool = True, return_mask: bool = False, level: int = 0,
-        compute_jacobian: bool = True
+        transformation: np.ndarray, level: int = 0, compute_jacobian: bool = True
     ):
         """
             Deprojects `depth_image_prev` into a 3d space, then it transforms this pointcloud using the estimated
@@ -124,26 +125,30 @@ class KerlDVO(BaseDenseVisualOdometry):
         warped_pixels = self._camera_model.project(pointcloud, np.zeros((6, 1), dtype=np.float32), level=level)
 
         # Interpolate intensity values for warped pixels projected coordinates
-        new_gray_image = np.zeros_like(gray_image_prev, dtype=np.float32)
-        new_gray_image[mask] = Interp2D.bilinear(warped_pixels[0], warped_pixels[1], gray_image)
 
         # NOTE: By the current implementation (17/04/2022) of 'Interp2D.bilinear' if we give the exact grid to retrieve
         # the same image, then last row and last column will be 0.0
-        residuals = np.zeros_like(gray_image_prev, dtype=np.float32)
-        residuals[mask] = new_gray_image[mask] - gray_image_prev[mask]
+        # residuals = (
+        #     Interp2D.bilinear(warped_pixels[0], warped_pixels[1], gray_image) - gray_image_prev[mask]
+        # ).reshape(-1, 1)
+        height, width = gray_image.shape
+        interp = RegularGridInterpolator(
+            points=(np.arange(height, dtype=int), np.arange(width, dtype=int)),
+            values=gray_image, method="linear"
+        )
+
+        residuals = (
+            interp(
+                np.clip(np.roll(warped_pixels[:2, :].T, 1, axis=1), a_min=[0, 0], a_max=[height - 1, width - 1])
+            ) - gray_image_prev[mask]
+        ).reshape(-1, 1)
 
         logger.debug(f"Residuals (min, max, mean): ({residuals.min()}, {residuals.max()}, {residuals.mean()})")
-
-        if not keep_dims:
-            residuals = residuals[mask].reshape(-1, 1)
 
         result = (residuals, )
 
         if compute_jacobian:
             result += (jacobian, )
-
-        if return_mask:
-            result += (mask, )
 
         return result
 
@@ -234,48 +239,47 @@ class KerlDVO(BaseDenseVisualOdometry):
                 # Compute Jacobian at identity
                 residuals, jacobian_at_identity = self._compute_residuals(
                     gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
-                    transformation=xi, keep_dims=False, level=level
+                    transformation=xi, level=level
                 )
                 jacobian_t = jacobian_at_identity.T
 
             else:
                 (residuals, ) = self._compute_residuals(
                     gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
-                    transformation=xi, keep_dims=False, level=level, compute_jacobian=False
+                    transformation=xi, level=level, compute_jacobian=False
                 )
 
             # Computes weights if required
             if self._weighter is not None:
 
                 weights = self._weighter.weight(residuals=residuals)
-                residuals = np.sqrt(weights) * residuals
-                jacobian = np.sqrt(weights) * jacobian_at_identity
+                err = np.sum(weights * (residuals ** 2))
+                residuals = weights * residuals
+                jacobian = weights * jacobian_at_identity
 
             else:
                 jacobian = jacobian_at_identity
+                err = np.linalg.norm(residuals) / np.sqrt(len(residuals))
 
             # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
             H = np.dot(jacobian_t, jacobian)
             b = - np.dot(jacobian_t, residuals)
 
-            # L = np.linalg.cholesky(H)
-            # y = np.linalg.solve(L.T, b)
-            # delta_xi = np.linalg.solve(L, y)
-            delta_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
+            # delta_xi = np.linalg.solve(H, b)
 
-            err = np.mean(residuals ** 2)
+            # Q, R = np.linalg.qr(H)
+            # delta_xi = solve_triangular(R, Q.T.dot(b))
+
+            L = np.linalg.cholesky(H)
+            y = solve_triangular(L, b, lower=True)
+            delta_xi = solve_triangular(L.T, y)
+
             err_diff = err - err_prev
 
             logger.debug("Iteration {} -> error: {:.4f}".format(i + 1, err))
 
             # Stopping criteria (as shown on paper, error function always displays a global minima)
             if err_diff > 0.0:
-                # error_increased_count += 1
-
-                # if error_increased_count > max_allowed_error_increase_steps:
-                #     end_cause = KerlDVO._ERROR_INCREASED_ON_ITERATION
-                #     logger.warning("Error increased, stopping iterations")
-                #     break
 
                 # Error increse, we keep last estimate and try best luck in next pyramid level
                 logger.warning("Error increased on iteration {}, breaking out..".format(i + 1))

@@ -51,4 +51,24 @@ class TestFindRigidBodyTransformFromPointclouds:
 
         # When + Then
         with pytest.raises(EstimationError):
-            find_rigid_body_transform_from_pointclouds(src_pc=pointcloud, dst_pc=dst_pointcloud[:3, :])
+            T = find_rigid_body_transform_from_pointclouds(src_pc=pointcloud, dst_pc=dst_pointcloud[:3, :])
+            print(T)
+
+    def test_given_noisy_pointclouds__then_ok(self, pointcloud):
+
+        # Given
+        transform = np.array([
+            [1, 0, 0, 2],
+            [0, 0, -1, 0],
+            [0, 1, 0, -5],
+            [0, 0, 0, 1]
+        ])
+
+        dst_pointcloud = np.dot(transform, np.vstack((pointcloud, np.ones((1, pointcloud.shape[1])))))
+        dst_pointcloud += np.random.normal(loc=0.0, scale=0.15, size=dst_pointcloud.shape)  # Gaussian noise up to 30cm
+
+        # When
+        T = find_rigid_body_transform_from_pointclouds(src_pc=pointcloud, dst_pc=dst_pointcloud[:3, :])
+
+        # Then
+        np.testing.assert_allclose(T, transform, atol=0.15)

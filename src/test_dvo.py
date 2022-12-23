@@ -3,6 +3,7 @@ import json
 import logging
 from time import time
 from argparse import ArgumentParser
+from typing import Union
 
 import numpy as np
 import cv2
@@ -10,7 +11,7 @@ from scipy.spatial.transform import Rotation as rot
 from scipy.spatial.distance import cdist
 from tqdm import tqdm
 
-from dense_visual_odometry.core import KerlDVO
+from dense_visual_odometry.core import get_dvo
 from dense_visual_odometry.camera_model import RGBDCameraModel
 from dense_visual_odometry.log import set_root_logger
 from dense_visual_odometry.utils.lie_algebra import SE3
@@ -32,12 +33,26 @@ def parse_arguments():
         "-s", "--size", type=int, default=None,
         help="Number of data samples to use (first 'size' samples are selected)"
     )
+    parser.add_argument("-m", "--method", type=str, default="kerl", help="Dense visual odometry method to use")
+    parser.add_argument("-c", "--config-file", type=str, help="Dense visual odometry method's configuraion JSON")
 
     args = parser.parse_args()
 
     set_root_logger(verbose=args.verbose)
 
-    return load_benchmark(type=args.benchmark, data_dir=args.data_dir, size=args.size)
+    gt_transforms, rgb_images, depth_images, camera_model, additional_info = load_benchmark(
+        type=args.benchmark, data_dir=args.data_dir, size=args.size
+    )
+
+    init_pose = gt_transforms[0] if gt_transforms[0] is not None else np.zeros((6, 1), dtype=np.float32)
+
+    config = {}
+    if args.config_file is not None:
+        config = _load_config(args.config_file)
+
+    dvo = get_dvo(args.method, camera_model=camera_model, init_pose=init_pose, **config)
+
+    return dvo, gt_transforms, rgb_images, depth_images, additional_info
 
 
 def load_benchmark(type: str, data_dir: str = None, size: int = None):
@@ -236,12 +251,24 @@ def _load__test_benchmark(data_path: Path = None):
     return transformations, rgb_images, depth_images, camera_model, additional_info
 
 
+def _load_config(path: Union[str, Path]):
+    path = Path(path).resolve()
+
+    if not path.exists():
+        raise FileNotFoundError("Could not find configuration file at '{}'".format(str(path)))
+
+    if not path.suffix == ".json":
+        raise ValueError("Expected config file to be '.json' got '{}' instead".format(path.suffix))
+
+    with path.open("r") as fp:
+        config = json.load(fp)
+
+    return config
+
+
 def main():
-    gt_transforms, rgb_images, depth_images, camera_model, additional_info = parse_arguments()
 
-    init_pose = gt_transforms[0] if gt_transforms[0] is not None else np.zeros((6, 1), dtype=np.float32)
-
-    dvo = KerlDVO(camera_model=camera_model, initial_pose=init_pose, levels=3)
+    dvo, gt_transforms, rgb_images, depth_images, additional_info = parse_arguments()
 
     steps = []
     errors = []
