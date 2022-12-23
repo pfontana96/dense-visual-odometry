@@ -80,7 +80,7 @@ class RANSAC:
                 model = self._model(x[:, current_set], y[:, current_set], weights=current_set_weights)
 
             except Exception as e:
-                logger.warning("Model estimation failed with '{}'. Skipping..".format(e))
+                logger.debug("Model estimation failed with '{}'. Skipping..".format(e))
 
                 ids = self._rng.permutation(N)
                 current_set = ids[:self._dof]
@@ -110,16 +110,17 @@ class RANSAC:
             current_set = ids[:self._dof]
 
         # Estimate one last model using all best inliers (in case last was best model)
-        current_set_weights = weights[best_consensus] if weights is not None else None
-        maybe_best_model = self._model(x[:, best_consensus], y[:, best_consensus], weights=current_set_weights)
-        validate_set = ids[np.in1d(ids, best_consensus, assume_unique=True, invert=True)]
-        losses = self._loss(x[:, validate_set], y[:, validate_set], maybe_best_model)
-        maybe_best_metric = self._metric(losses)
+        if len(best_consensus) > 0:
+            current_set_weights = weights[best_consensus] if weights is not None else None
+            maybe_best_model = self._model(x[:, best_consensus], y[:, best_consensus], weights=current_set_weights)
+            validate_set = ids[np.in1d(ids, best_consensus, assume_unique=True, invert=True)]
+            losses = self._loss(x[:, validate_set], y[:, validate_set], maybe_best_model)
+            maybe_best_metric = self._metric(losses)
 
-        if maybe_best_metric < best_metric:
-            best_model = maybe_best_model
-            best_metric = maybe_best_metric
-            best_consensus = validate_set[(losses <= threshold).flatten()]
+            if maybe_best_metric < best_metric:
+                best_model = maybe_best_model
+                best_metric = maybe_best_metric
+                best_consensus = validate_set[(losses <= threshold).flatten()]
 
         logger.debug("Best consensus size: {} (input: {})".format(len(best_consensus), x.shape[1]))
         return best_model, best_consensus, best_metric
