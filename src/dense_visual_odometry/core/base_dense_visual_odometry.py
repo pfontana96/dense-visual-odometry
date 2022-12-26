@@ -14,6 +14,10 @@ from dense_visual_odometry.utils.lie_algebra import SE3
 logger = logging.getLogger(__name__)
 
 
+class DVOError(Exception):
+    pass
+
+
 class BaseDenseVisualOdometry(abc.ABC):
     """
         Base class for performing Visual odometry using RGBD images
@@ -75,12 +79,13 @@ class BaseDenseVisualOdometry(abc.ABC):
         # pose (ergo {t}_to_{world}) will be:
         # current_pose = {t-1}_to_{world} * {t}_to_{t-1} = {t-1}_to_{world} * ({t-1}_to_{t})^(-1)
         if transform is not None:
+            self._last_pose = self._current_pose.copy()
             self._current_pose = SE3.log(np.dot(SE3.exp(self._current_pose), SE3.inverse(SE3.exp(transform))))
             self._gray_image_prev = gray_image
             self._depth_image_prev = depth_image
 
         else:
-            logger.warning("DVO Could estimate transform, trying luck on next frame..")
+            logger.warning("DVO could not estimate transform, trying luck on next frame..")
 
         return transform
 

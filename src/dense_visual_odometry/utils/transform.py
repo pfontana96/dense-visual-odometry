@@ -12,7 +12,7 @@ class EstimationError(Exception):
     pass
 
 
-def find_rigid_body_transform_from_pointclouds(src_pc: np.ndarray, dst_pc: np.ndarray, weights: np.ndarray = None):
+def find_rigid_body_transform_from_pointclouds_SVD(src_pc: np.ndarray, dst_pc: np.ndarray, weights: np.ndarray = None):
     """Finds optimal rigid body transform given 2 pointcloud of correspondances via an equivalent least squares
     solution.
 
@@ -68,18 +68,19 @@ def find_rigid_body_transform_from_pointclouds(src_pc: np.ndarray, dst_pc: np.nd
     R = np.dot(Vt.T, U.T)
 
     # Check for possible reflection
-    if np.allclose(np.linalg.det(R), -1.0):
+    if np.allclose(np.linalg.det(R), -1.0, atol=1e-3):
 
-        lambdas = np.isclose(X, 0.0, atol=0.005)
-        logger.debug("Determinant equals -1, lambdas: {}".format(X.tolist()))
+        # lambdas = np.isclose(X, 0.0, atol=0.005)
+        # logger.debug("Determinant equals -1, lambdas: {}".format(X.tolist()))
+        # print("Determinant equals -1, lambdas: {}".format(X.tolist()))
 
-        if lambdas.any():
-            V_1 = Vt.T.copy()
-            V_1[:, lambdas] *= (-1)  # Inverse sign
-            R = np.dot(V_1, U.T)
-        # R = np.dot(Vt.T * np.array([1, 1, -1]), U.T)
+        # if lambdas.any():
+        #     V_1 = Vt.T.copy()
+        #     V_1[:, lambdas] *= (-1)  # Inverse sign
+        #     R = np.dot(V_1, U.T)
+        R = np.dot(Vt.T * np.array([1, 1, -1]).reshape(3, 1), U.T)
 
-    if not np.allclose(np.linalg.det(R), 1.0, atol=0.01):
+    if not is_rotation_matrix(R):
         raise EstimationError("Could not estimate rotation matrix (determinant: {})".format(np.linalg.det(R)))
 
     # Compute translation
@@ -92,7 +93,7 @@ def find_rigid_body_transform_from_pointclouds(src_pc: np.ndarray, dst_pc: np.nd
     return transform
 
 
-def find_rigid_body_transform_from_pointclouds_1(src_pc: np.ndarray, dst_pc: np.ndarray, weights: np.ndarray = None):
+def find_rigid_body_transform_from_pointclouds_quat(src_pc: np.ndarray, dst_pc: np.ndarray, weights: np.ndarray = None):
     """Finds optimal rigid body transform given 2 pointcloud of correspondances via an equivalent least squares
     solution.
 
@@ -138,7 +139,7 @@ def find_rigid_body_transform_from_pointclouds_1(src_pc: np.ndarray, dst_pc: np.
     q2 = dst_pc - dst_centroids
 
     # Compute covariance matrix
-    H = np.dot(q1, q2.T) / src_pc.shape[1]
+    H = np.dot(q2, q1.T) / src_pc.shape[1]
 
     # Anti-symmetric matrix
     A = H - H.T
@@ -163,10 +164,10 @@ def find_rigid_body_transform_from_pointclouds_1(src_pc: np.ndarray, dst_pc: np.
         raise EstimationError("Could not estimate rotation matrix (determinant: {})".format(np.linalg.det(R)))
 
     # Compute translation
-    T = dst_centroids - np.dot(R, src_centroids)
+    t = dst_centroids - np.dot(R, src_centroids)
 
     transform = np.eye(4, dtype=np.float32)
     transform[:3, :3] = R
-    transform[:3, 3] = T.reshape(-1)
+    transform[:3, 3] = t.reshape(-1)
 
     return transform

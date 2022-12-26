@@ -14,15 +14,18 @@ class TDistributionWeighter(BaseWeighter):
         self._init_sigma = initial_sigma
         self._init_lambda = 1.0 / (self._init_sigma ** 2)
 
-    def weight(self, residuals: np.ndarray):
+    def weight(self, residuals_squared: np.ndarray):
 
-        residuals_squared = residuals ** 2
         last_lambda = self._init_lambda
         for _ in range(self._max_iter):
-            sigma_2 = np.mean(residuals_squared * ((self._dof + 1) / (self._dof + residuals_squared * last_lambda)))
+            sigma_2 = np.mean(
+                residuals_squared * ((self._dof + 1) / (self._dof + residuals_squared * last_lambda)) * residuals_squared  # noqa
+            )
 
             curr_lambda = 1 / sigma_2
             if abs(curr_lambda - last_lambda) < self._tolerance:
                 break
+
+            last_lambda = curr_lambda
 
         return (self._dof + 1) / (self._dof + residuals_squared * curr_lambda)

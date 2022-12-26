@@ -4,6 +4,8 @@ import logging
 import yaml
 from typing import Union
 
+import cupy as cp  # noqa
+
 from dense_visual_odometry.utils.lie_algebra import SE3
 from dense_visual_odometry.utils.numpy_cache import np_cache
 
@@ -12,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 # TODO: Support distorssion coefficients
+# TODO: Support GPU
 class RGBDCameraModel:
     """
         Class that models a camera using the pinhole model
@@ -25,7 +28,7 @@ class RGBDCameraModel:
 
     def __init__(
         self, intrinsics: np.ndarray, depth_scale: float, distorssion_coeffs: Union[np.ndarray, None] = None,
-        distorssion_model: Union[str, None] = None
+        distorssion_model: Union[str, None] = None, levels: int = None
     ):
         """
             Creates a RGBDCameraModel instance
@@ -56,6 +59,22 @@ class RGBDCameraModel:
 
         self.distorssion_coeffs = distorssion_coeffs
         self.distorsion_model = distorssion_model
+
+    def at(self, level: int):
+
+        if level == 0:
+            return self._intrinsics
+
+        scale_matrix = np.array([
+            [2 ** level, 0, 2 ** (level - 1) - 0.5],
+            [0, 2 ** level, 2 ** (level - 1) - 0.5],
+            [0, 0, 1]
+        ], dtype=np.float32)
+
+        level_intrinsics = np.zeros((3, 4), dtype=np.float32)
+        level_intrinsics[:3, :3] = np.dot(scale_matrix, self._intrinsics[:3, :3])
+
+        return level_intrinsics
 
     @classmethod
     def load_from_yaml(cls, filepath: Path):
@@ -197,18 +216,11 @@ class RGBDCameraModel:
         x_pixel = x_pixel[mask]
         y_pixel = y_pixel[mask]
 
-        scale_matrix = np.array([
-            [2 ** level, 0, 2 ** (level - 1) - 0.5],
-            [0, 2 ** level, 2 ** (level - 1) - 0.5],
-            [0, 0, 1]
-        ], dtype=np.float32)
+        intrinsics = self.at(level)
 
         # Map from pixel position to 3d coordinates using camera matrix (inverted)
         # Get x, y points w.r.t camera reference frame (still not multiply by the depth)
-        points = np.dot(
-            np.linalg.inv(np.dot(scale_matrix, self._intrinsics[:3, :3])),
-            np.vstack((x_pixel, y_pixel, np.ones_like(z)))
-        )
+        points = np.dot(np.linalg.inv(intrinsics[:3, :3]), np.vstack((x_pixel, y_pixel, np.ones_like(z))))
 
         pointcloud = np.vstack((points[0, :] * z, points[1, :] * z, z, np.ones_like(z)))
 
@@ -240,13 +252,9 @@ class RGBDCameraModel:
             values might not be integer and might lie between physical pixels, user must then decide what to do
             with those
         """
-        scale_matrix = np.array([
-            [2 ** level, 0, 2 ** (level - 1) - 0.5],
-            [0, 2 ** level, 2 ** (level - 1) - 0.5],
-            [0, 0, 1]
-        ], dtype=np.float32)
+        intrinsics = self.at(level)
 
-        camera_matrix = np.dot(np.dot(scale_matrix, self._intrinsics), SE3.inverse(SE3.exp(camera_pose)))
+        camera_matrix = np.dot(intrinsics, SE3.inverse(SE3.exp(camera_pose)))
         points_pixels = np.dot(camera_matrix, pointcloud)
         points_pixels /= points_pixels[2, :]
 
