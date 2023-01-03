@@ -1,6 +1,7 @@
 # --extra-index-url https://download.pytorch.org/whl/cu116
 pandas~=1.4.4
 numpy~=1.19.4
+scipy~=1.5.4
 opencv-python~=4.6.0
 pyyaml~=6.0.0
 # cupy~=9.6.0
