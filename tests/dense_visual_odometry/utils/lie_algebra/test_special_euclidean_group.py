@@ -1,6 +1,8 @@
+import math
+
 import numpy as np
 
-from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
+from dense_visual_odometry.utils.lie_algebra import Se3, So3
 
 from unittest import TestCase
 
@@ -16,86 +18,80 @@ class TestSE3(TestCase):
     def test__given_xi__when_hat__then_ok(self):
 
         # Given
-        xi = np.array([1, 2, 3, 4, 5, 6], dtype=np.float32).reshape(6, 1)
+        i = math.sqrt(1 / 3)
+        xi = np.array([1, 2, 3, i, i, i], dtype=np.float32).reshape(6, 1)
+        pose = Se3.from_se3(xi)
 
         # When
-        xi_hat = SE3.hat(xi)
+        xi_hat = pose.hat()
 
         # Then
         expected_xi_hat = np.array(
-            [[0.0, -6., 5.0, 1.0],
-             [6.0, 0.0, -4., 2.0],
-             [-5., 4.0, 0.0, 3.0],
+            [[0.0, -i, i, 1.0],
+             [i, 0.0, -i, 2.0],
+             [-i, i, 0.0, 3.0],
              [0.0, 0.0, 0.0, 0.0]],
             dtype=np.float32
         )
 
         np.testing.assert_almost_equal(xi_hat, expected_xi_hat, decimal=6)
 
-    def test__given_wrong_type__when_hat__then_raises_assertion(self):
-
-        # Given
-        xi = [1, 2, 3, 4, 5, 6]
-
-        # When and Then
-        with self.assertRaises(AssertionError):
-            _ = SE3.hat(xi)
-
-    def test__given_wrong_shape__when_hat__then_raises_assertion(self):
+    def test__given_wrong_shape__when_from_se3__then_raises_assertion(self):
 
         # Given
         xi = np.array([1, 2, 3, 4, 5, 6])
 
         # When and Then
         with self.assertRaises(AssertionError):
-            _ = SE3.hat(xi)
+            _ = Se3.from_se3(xi)
 
-    def test__given_xi__when_curly_hat__then_ok(self):
+    # def test__given_xi__when_curly_hat__then_ok(self):
 
-        # Given
-        xi = np.array([1, 2, 3, 4, 5, 6], dtype=np.float32).reshape(6, 1)
+    #     # Given
+    #     xi = np.array([1, 2, 3, 4, 5, 6], dtype=np.float32).reshape(6, 1)
 
-        # When
-        xi_curly_hat = SE3.curly_hat(xi)
+    #     # When
+    #     xi_curly_hat = SE3.curly_hat(xi)
 
-        # Then
-        expected_xi_curly_hat = np.array(
-            [[0.0, -6., 5.0, 0.0, -3., 2.0],
-             [6.0, 0.0, -4., 3.0, 0.0, -1.],
-             [-5., 4.0, 0.0, -2., 1.0, 0.0],
-             [0.0, 0.0, 0.0, 0.0, -6., 5.0],
-             [0.0, 0.0, 0.0, 6.0, 0.0, -4.],
-             [0.0, 0.0, 0.0, -5., 4.0, 0.0]],
-            dtype=np.float32
-        )
+    #     # Then
+    #     expected_xi_curly_hat = np.array(
+    #         [[0.0, -6., 5.0, 0.0, -3., 2.0],
+    #          [6.0, 0.0, -4., 3.0, 0.0, -1.],
+    #          [-5., 4.0, 0.0, -2., 1.0, 0.0],
+    #          [0.0, 0.0, 0.0, 0.0, -6., 5.0],
+    #          [0.0, 0.0, 0.0, 6.0, 0.0, -4.],
+    #          [0.0, 0.0, 0.0, -5., 4.0, 0.0]],
+    #         dtype=np.float32
+    #     )
 
-        np.testing.assert_almost_equal(xi_curly_hat, expected_xi_curly_hat, decimal=6)
+    #     np.testing.assert_almost_equal(xi_curly_hat, expected_xi_curly_hat, decimal=6)
 
-    def test__given_wrong_type__when_curly_hat__then_raises_assertion(self):
+    # def test__given_wrong_type__when_curly_hat__then_raises_assertion(self):
 
-        # Given
-        xi = [1, 2, 3, 4, 5, 6]
+    #     # Given
+    #     xi = [1, 2, 3, 4, 5, 6]
 
-        # When and Then
-        with self.assertRaises(AssertionError):
-            _ = SE3.curly_hat(xi)
+    #     # When and Then
+    #     with self.assertRaises(AssertionError):
+    #         _ = SE3.curly_hat(xi)
 
-    def test__given_wrong_shape__when_curly_hat__then_raises_assertion(self):
+    # def test__given_wrong_shape__when_curly_hat__then_raises_assertion(self):
 
-        # Given
-        xi = np.array([1, 2, 3, 4, 5, 6])
+    #     # Given
+    #     xi = np.array([1, 2, 3, 4, 5, 6])
 
-        # When and Then
-        with self.assertRaises(AssertionError):
-            _ = SE3.curly_hat(xi)
+    #     # When and Then
+    #     with self.assertRaises(AssertionError):
+    #         _ = SE3.curly_hat(xi)
 
     def test__given_xi__when_exp__then_ok(self):
 
         # Given
         xi = np.array([1.4852, -3.156, -4.578, 0.4893, 0.3232, -1.2345], dtype=np.float32).reshape(6, 1)
+        pose = Se3.from_se3(xi)
 
         # When
-        T = SE3.exp(xi)
+        T = pose.exp()
 
         # Then
         expected_T = np.array(
@@ -112,32 +108,15 @@ class TestSE3(TestCase):
 
         # Given
         xi = np.zeros((6, 1), dtype=np.float32)
+        pose = Se3.from_se3(xi)
 
         # When
-        T = SE3.exp(xi)
+        T = pose.exp()
 
         # Then
         expected_T = np.eye(4, dtype=np.float32)
 
         np.testing.assert_almost_equal(T, expected_T, decimal=6)
-
-    def test__given_wrong_type__when_exp__then_raises_assertion(self):
-
-        # Given
-        xi = [1, 2, 3, 4, 5, 6]
-
-        # When and Then
-        with self.assertRaises(AssertionError):
-            _ = SE3.exp(xi)
-
-    def test__given_wrong_shape__when_exp__then_raises_assertion(self):
-
-        # Given
-        xi = np.array([1, 2, 3, 4, 5, 6])
-
-        # When and Then
-        with self.assertRaises(AssertionError):
-            _ = SE3.exp(xi)
 
     def test__given_T__when_log__then_ok(self):
 
@@ -149,9 +128,10 @@ class TestSE3(TestCase):
              [0.00000000, 0.0000000,  0.0000000, 1.00000000]],
             dtype=np.float32
         )
+        pose = Se3(So3(T[:3, :3]), T[:3, 3].reshape(3, 1))
 
         # When
-        xi = SE3.log(T)
+        xi = pose.log()
 
         # Then
         expected_xi = np.array([1.4852, -3.156, -4.578, 0.4893, 0.3232, -1.2345], dtype=np.float32).reshape(6, 1)
@@ -162,29 +142,12 @@ class TestSE3(TestCase):
 
         # Given
         T = np.eye(4, dtype=np.float32)
+        pose = Se3(So3(T[:3, :3]), T[:3, 3].reshape(3, 1))
 
         # When
-        xi = SE3.log(T)
+        xi = pose.log()
 
         # Then
         expected_xi = np.zeros((6, 1), dtype=np.float32)
 
         np.testing.assert_almost_equal(xi, expected_xi, decimal=6)
-
-    def test__given_wrong_type__when_log__then_raises_assertion(self):
-
-        # Given
-        xi = [1, 2, 3, 4, 5, 6]
-
-        # When and Then
-        with self.assertRaises(AssertionError):
-            _ = SE3.log(xi)
-
-    def test__given_wrong_shape__when_log__then_raises_assertion(self):
-
-        # Given
-        xi = np.array([1, 2, 3, 4, 5, 6])
-
-        # When and Then
-        with self.assertRaises(AssertionError):
-            _ = SE3.log(xi)

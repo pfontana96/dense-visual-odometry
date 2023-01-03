@@ -2,158 +2,127 @@
 # Special Orthogonal and Special Eucledian groups (Lie's algebra)
 # It was based on Tim Barfoot's book available on:
 # http://asrl.utias.utoronto.ca/~tdb/bib/barfoot_ser17.pdf
+import math
 
 import numpy as np
-import logging
 
 from dense_visual_odometry.utils.lie_algebra.base_special_group import BaseSpecialGroup, _LIE_EPSILON
-from dense_visual_odometry.utils.lie_algebra.special_orthogonal_group import SO3
-from dense_visual_odometry.utils.lie_algebra.common import wrap_angle
+from dense_visual_odometry.utils.lie_algebra.special_orthogonal_group import So3
 
 
-logger = logging.getLogger(__name__)
+class Se3(BaseSpecialGroup):
 
+    def __init__(self, so3: So3, tvec: np.ndarray):
+        assert isinstance(so3, So3), "Expected 'so3' to be of type 'So3', got '{}' instead".format(type(so3))
+        assert tvec.shape == (3, 1), "Expected 'tvec' to have shape '(3, 1)', got '{}' instead".format(tvec.shape)
 
-class SE3(BaseSpecialGroup):
+        self._so3 = so3
+        self._tvec = tvec.copy()
 
-    @staticmethod
-    def hat(xi: np.ndarray):
-        assert type(xi) == np.ndarray, "'xi' should be a numpy array"
-        assert xi.shape == (6, 1), "Expected shape of (6,1) for 'xi', got {} instead".format(xi.shape)
+        self._matrix = None
+        self._xi = None
+        self._hat = None
 
-        hat = np.zeros((4, 4), dtype=np.float32)
-        hat[:3, :3] = SO3.hat(xi[3:, :])
-        hat[:3, 3] = xi[:3, 0]
+    def hat(self):
 
-        return hat
+        if self._hat is None:
+            self._hat = np.zeros((4, 4), dtype=np.float32)
+            self._hat[:3, :3] = self._so3.hat()
+            self._hat[:3, 3] = self.log()[:3, 0]
 
-    @staticmethod
-    def curly_hat(xi: np.ndarray):
-        """
-            Returns the adjoint of an element of s3(3)
+        return self._hat
 
-        Parameters
-        ----------
-        xi : np.ndarray
-            se(3) array
+    def exp(self):
+        if self._matrix is None:
 
-        Returns
-        -------
-        curly_hat : np.ndarray
-            Adjoint matrix (6,6)
-        """
-        assert type(xi) == np.ndarray, "'xi' should be a numpy array"
-        assert xi.shape == (6, 1), "Expected shape of (6,1) for 'xi', got {} instead".format(xi.shape)
+            T = np.eye(4, dtype=np.float32)
 
-        phi_hat = SO3.hat(xi[3:, :])
-        rho_hat = SO3.hat(xi[:3, :])
+            phi = self._so3.log()
+            theta = np.linalg.norm(phi)
 
-        curly_hat = np.zeros((6, 6), dtype=np.float32)
-        curly_hat[:3, :3] = phi_hat
-        curly_hat[3:, 3:] = phi_hat
-        curly_hat[:3, 3:] = rho_hat
+            if abs(theta) < _LIE_EPSILON:
+                T[:3, 3] = self._tvec.flatten()
 
-        return curly_hat
+            else:
+                T[:3, :3] = self._so3.exp()
+                T[:3, 3] = self._tvec.flatten()
 
-    @staticmethod
-    def exp(xi: np.ndarray):
-        """
-        Exponential mapping from se(3) to SE(3), i.e, R6 --> R4x4
+            self._matrix = T
 
-        Parameters
-        ----------
-        xi : np.ndarray
-            se(3) array
+        return self._matrix
 
-        Returns
-        -------
-        T : np.ndarray
-            Transformation matrix (4,4) corresponding to the exponential map of 'xi'
-        """
-        assert type(xi) == np.ndarray, "'xi' should be a numpy array"
-        assert xi.shape == (6, 1), "Expected shape of (6,1) for 'xi', got {} instead".format(xi.shape)
+    def log(self):
 
-        xi_hat = SE3.hat(xi)
+        if self._xi is None:
 
-        theta = np.linalg.norm(xi[3:, 0])
+            xi = np.zeros((6, 1), dtype=np.float32)
 
-        # Wrap angle between [-pi,pi)
-        theta = wrap_angle(theta)
+            phi = self._so3.log()
+            theta = np.linalg.norm(phi)
 
-        T = np.eye(4, dtype=np.float32)
+            if abs(theta) < _LIE_EPSILON:
+                xi[:3, 0] = self._tvec.flatten()
 
-        # Check for singularity at 0 deg rotation
+            else:
+                a = So3(phi.reshape(3, 1) / theta)
+                a_hat = a.hat()
+                theta_2 = theta / 2
+                A = theta_2 * np.cos(theta_2) / np.sin(theta_2)
+                V_inv = A * np.eye(3, dtype=np.float32) + (1 - A) * np.dot(a.log(), a.log().T) - theta_2 * a_hat
+                xi[:3, 0] = np.dot(V_inv, self._tvec).flatten()
+                xi[3:, 0] = self._so3.log().flatten()
+
+            self._xi = xi
+
+        return self._xi
+
+    def inverse(self):
+        so3_inv = self._so3.inverse()
+        return Se3(so3_inv, -np.dot(so3_inv.exp(), self._tvec))
+
+    @property
+    def so3(self):
+        return self._so3
+
+    @property
+    def tvec(self):
+        return self._tvec
+
+    def __mul__(self, right):
+        assert isinstance(right, Se3), "Expected 'right' to be of type 'Se3', got '{}' instead.".format(type(right))
+        so3 = self._so3 * right.so3
+        tvec = self._tvec + np.dot(self._so3.exp(), right.tvec)
+
+        return Se3(so3, tvec)
+
+    @classmethod
+    def identity(cls):
+        return cls(So3.identity(), np.zeros((3, 1), dtype=np.float32))
+
+    def copy(self):
+        return Se3(self.so3.copy(), self.tvec.copy())
+
+    @classmethod
+    def from_se3(cls, xi: np.ndarray):
+        assert xi.shape == (6, 1), "Expected 'xi' to have shape '(6, 1)', got '{}' instead".format(xi.shape)
+
+        upsilon = xi[:3]
+        so3 = So3(xi[3:])
+        phi_hat = so3.hat()
+        phi_hat_sq = np.dot(phi_hat, phi_hat)
+        theta = so3.theta
+
         if theta < _LIE_EPSILON:
-            logger.debug("Singular rotation (i.e 'theta' = 0)")
-            T[:3, 3] = xi[:3, 0]
+            return cls(So3.identity(), upsilon)
 
-        else:
-            xi_hat = SE3.hat(xi)
-            xi_hat_2 = np.dot(xi_hat, xi_hat)
-            theta_2 = theta*theta
-            T += (
-                xi_hat + ((1.0 - np.cos(theta)) / theta_2) * xi_hat_2
-                + ((theta - np.sin(theta)) / (theta_2 * theta)) * np.dot(xi_hat_2, xi_hat)
-            )
+        V = (
+            np.eye(3, dtype=np.float32) + ((1 - math.cos(theta)) / (theta**2)) * phi_hat +
+            ((theta - math.sin(theta)) / (theta ** 3)) * phi_hat_sq
+        )
 
-        return T
+        return cls(So3(xi[3:]), np.dot(V, upsilon))
 
-    @staticmethod
-    def log(T: np.ndarray):
-        """
-        Logarithmic mapping from SE(3) to se(3), i.e, R4x4 --> R6
+    def __eq__(self, other) -> bool:
+        assert isinstance(other, Se3), "Expected 'other' to be of type 'Se3', got '{}' instead".format(type(other))
 
-        Parameters
-        ----------
-        T : np.ndarray
-            Transformation matrix
-
-        Returns
-        -------
-        xi : np.ndarray
-            se(3) vector corresponding to the logarithmic map of 'T'
-        """
-        assert type(T) == np.ndarray, "'T' should be a numpy array"
-        assert T.shape == (4, 4), "Expected shape (4,4) for 'T', got {} instead".format(T.shape)
-
-        xi = np.zeros((6, 1), dtype=np.float32)
-        xi[3:, 0] = SO3.log(T[:3, :3]).reshape(-1)
-
-        theta = np.linalg.norm(xi[3:, 0])
-
-        if np.abs(theta) < _LIE_EPSILON:
-            xi[3:, 0] = np.zeros(3, dtype=np.float32)
-            xi[:3, 0] = T[:3, 3]
-        else:
-            a = (xi[3:, 0] / theta).reshape(3, 1)
-            a_hat = SO3.hat(a)
-            theta_2 = theta / 2
-            A = theta_2 * np.cos(theta_2) / np.sin(theta_2)
-            V_inv = A * np.eye(3, dtype=np.float32) + (1 - A) * np.dot(a, a.T) - theta_2 * a_hat
-            xi[:3, 0] = np.dot(V_inv, T[:3, 3]).reshape(-1)
-
-        return xi
-
-    @staticmethod
-    def inverse(T: np.ndarray):
-        """
-            Returns the inverse of a transformation matrix (4x4)
-
-        Parameters
-        ----------
-        T : np.ndarray:
-            4x4 Transformation matrix
-
-        Returns
-        -------
-        T : np.ndarray
-            4x4 Transformation matrix
-        """
-        assert type(T) == np.ndarray, "'T' should be a numpy array"
-        assert T.shape == (4, 4), "Expected shape (4,4) for 'T', got {} instead".format(T.shape)
-
-        T_inverse = np.eye(4, 4, dtype=np.float32)
-        T_inverse[:3, :3] = T[:3, :3].T
-        T_inverse[:3, 3] = -np.dot(T[:3, :3].T, T[:3, 3])
-
-        return T_inverse
+        return np.allclose(self.log(), other.log(), atol=_LIE_EPSILON)

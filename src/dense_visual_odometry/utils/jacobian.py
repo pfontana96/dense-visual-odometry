@@ -1,8 +1,11 @@
 import numpy as np
+# import cupy as cp
 import cv2
 
 
-def compute_jacobian_of_warp_function(pointcloud: np.ndarray, calibration_matrix: np.ndarray):
+def compute_jacobian_of_warp_function(
+    pointcloud: np.ndarray, calibration_matrix: np.ndarray, use_gpu: bool = False
+) -> np.ndarray:
     """
         Computes the Jacobian of a warp function
 
@@ -16,7 +19,7 @@ def compute_jacobian_of_warp_function(pointcloud: np.ndarray, calibration_matrix
     Notes
     -----
     `J_w = J_pi * J_g * J_G` Where: `J_pi` is the 2x3 matrix of derivatives of the projection function with respect to
-    points coordinates, `J_g` is the 3x12 Jacobian of the rigid body transformation with respecto to its 12 parameters
+    points coordinates, `J_g` is the 3x12 Jacobian of the rigid body transformation with respect to its 12 parameters
     and `J_G` is the 12x6 Jacobian matrix of the exponential map (Lie Algebra). So `J_w` is a 2x6 matrix
     """
     fx = calibration_matrix[0, 0]

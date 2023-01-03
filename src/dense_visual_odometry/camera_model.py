@@ -4,7 +4,8 @@ import logging
 import yaml
 from typing import Union
 
-from dense_visual_odometry.utils.lie_algebra import SE3
+# import cupy as cp  # noqa
+
 from dense_visual_odometry.utils.numpy_cache import np_cache
 
 
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 # TODO: Support distorssion coefficients
+# TODO: Support GPU
 class RGBDCameraModel:
     """
         Class that models a camera using the pinhole model
@@ -57,6 +59,22 @@ class RGBDCameraModel:
         self.distorssion_coeffs = distorssion_coeffs
         self.distorsion_model = distorssion_model
 
+    def at(self, level: int):
+
+        if level == 0:
+            return self._intrinsics
+
+        scale_matrix = np.array([
+            [2 ** level, 0, 2 ** (level - 1) - 0.5],
+            [0, 2 ** level, 2 ** (level - 1) - 0.5],
+            [0, 0, 1]
+        ], dtype=np.float32)
+
+        level_intrinsics = np.zeros((3, 4), dtype=np.float32)
+        level_intrinsics[:3, :3] = np.dot(scale_matrix, self._intrinsics[:3, :3])
+
+        return level_intrinsics
+
     @classmethod
     def load_from_yaml(cls, filepath: Path):
         """
@@ -92,10 +110,13 @@ class RGBDCameraModel:
 
         return cls(camera_matrix, depth_scale, distorssion_coefficients, distorssion_model)
 
-    @np_cache
-    def deproject(self, depth_image: np.ndarray, camera_pose: np.ndarray, return_mask: bool = False, level: int = 0):
+    # NOTE: Does compute invalid depth, user must do it
+    def deproject_unsafe(
+        self, depth_image: np.ndarray, mask: np.ndarray, level: int = 0
+    ):
         """
-            Deprojects a depth image into the World reference frame
+            Deprojects a depth image into the World reference frame without taking into account no valid
+            pixels (user must defined mask of valid pixels)
 
         Parameters
         ----------
@@ -103,6 +124,58 @@ class RGBDCameraModel:
             Depth image (with invalid pixels defined with the value 0)
         camera_pose : np.ndarray
             Camera pose w.r.t World coordinate frame expressed as a 6x1 se(3) vector
+
+        Returns
+        -------
+        pointcloud : np.ndarray
+            3D Point (4xN) coordinates of projected points in Homogeneous coordinates (i.e x, y, z, 1)
+        """
+        assertion_msg = "Expected 'depth_image' and 'mask' to have the same shape, got '{}' and '{}'".format(
+            depth_image.shape, mask.shape
+        )
+        assert depth_image.shape == mask.shape, assertion_msg
+
+        height, width = depth_image.shape
+
+        z = (depth_image[mask] * self.depth_scale).astype(np.float32)
+
+        # Compute sensor grid
+        # TODO: Use a more efficient way of creating pointcloud -> Several pixels values are repeated. See `sparse`
+        # parameter of `np.meshgrid`
+        x_pixel, y_pixel = np.meshgrid(
+            np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32), copy=False
+        )
+        x_pixel = x_pixel[mask]
+        y_pixel = y_pixel[mask]
+
+        scale_matrix = np.array([
+            [2 ** level, 0, 2 ** (level - 1) - 0.5],
+            [0, 2 ** level, 2 ** (level - 1) - 0.5],
+            [0, 0, 1]
+        ], dtype=np.float32)
+
+        # Map from pixel position to 3d coordinates using camera matrix (inverted)
+        # Get x, y points w.r.t camera reference frame (still not multiply by the depth)
+        points = np.dot(
+            np.linalg.inv(np.dot(scale_matrix, self._intrinsics[:3, :3])),
+            np.vstack((x_pixel, y_pixel, np.ones_like(z)))
+        )
+
+        pointcloud = np.vstack((points[0, :] * z, points[1, :] * z, z, np.ones_like(z)))
+
+        return pointcloud
+
+    @np_cache
+    def deproject(
+        self, depth_image: np.ndarray, return_mask: bool = False, level: int = 0, mask_pixels: np.ndarray = None
+    ):
+        """
+            Deprojects a depth image into the camera reference frame
+
+        Parameters
+        ----------
+        depth_image : np.ndarray
+            Depth image (with invalid pixels defined with the value 0)
         return_mask : bool
             if True, then a bolean mask is returned with valid pixels
 
@@ -114,10 +187,14 @@ class RGBDCameraModel:
             Boolean mask with the same shape as `depth_image` with True on valid pixels and false on non valid.
         """
         height, width = depth_image.shape
-        z = depth_image.reshape(-1) * self.depth_scale
 
         # Remove invalid points
-        mask = z != 0.0
+        mask = depth_image != 0.0
+        if mask_pixels is not None:
+            mask = np.logical_and(mask, mask_pixels)
+        mask = mask.reshape(-1)
+
+        z = depth_image.reshape(-1) * self.depth_scale
         z = z[mask].astype(np.float32)
 
         # Compute sensor grid
@@ -132,31 +209,20 @@ class RGBDCameraModel:
         x_pixel = x_pixel[mask]
         y_pixel = y_pixel[mask]
 
-        scale_matrix = np.array([
-            [2 ** level, 0, 2 ** (level - 1) - 0.5],
-            [0, 2 ** level, 2 ** (level - 1) - 0.5],
-            [0, 0, 1]
-        ])
+        intrinsics = self.at(level)
 
         # Map from pixel position to 3d coordinates using camera matrix (inverted)
         # Get x, y points w.r.t camera reference frame (still not multiply by the depth)
-        points = np.dot(
-            np.linalg.inv(np.dot(scale_matrix, self._intrinsics[:3, :3])),
-            np.vstack((x_pixel, y_pixel, np.ones_like(z)))
-        )
+        points = np.dot(np.linalg.inv(intrinsics[:3, :3]), np.vstack((x_pixel, y_pixel, np.ones_like(z))))
 
         pointcloud = np.vstack((points[0, :] * z, points[1, :] * z, z, np.ones_like(z)))
-
-        # Convert from camera reference frame to world reference frame
-        pointcloud = np.dot(SE3.exp(camera_pose), pointcloud)
 
         if return_mask:
             return (pointcloud, mask.reshape(depth_image.shape))
 
         return pointcloud
 
-    @np_cache
-    def project(self, pointcloud: np.ndarray, camera_pose: np.ndarray, level: int = 0):
+    def project(self, pointcloud: np.ndarray, level: int = 0):
         """
             Projects given pointcloud to image plane
 
@@ -175,14 +241,9 @@ class RGBDCameraModel:
             values might not be integer and might lie between physical pixels, user must then decide what to do
             with those
         """
-        scale_matrix = np.array([
-            [2 ** level, 0, 2 ** (level - 1) - 0.5],
-            [0, 2 ** level, 2 ** (level - 1) - 0.5],
-            [0, 0, 1]
-        ])
+        intrinsics = self.at(level)
 
-        camera_matrix = np.dot(np.dot(scale_matrix, self._intrinsics), SE3.inverse(SE3.exp(camera_pose)))
-        points_pixels = np.dot(camera_matrix, pointcloud)
+        points_pixels = np.dot(intrinsics, pointcloud)
         points_pixels /= points_pixels[2, :]
 
         return points_pixels
