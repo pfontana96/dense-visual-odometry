@@ -7,14 +7,13 @@ from typing import Union
 
 import numpy as np
 import cv2
-from scipy.spatial.transform import Rotation as rot
 from scipy.spatial.distance import cdist
 from tqdm import tqdm
 
 from dense_visual_odometry.core import get_dvo
 from dense_visual_odometry.camera_model import RGBDCameraModel
 from dense_visual_odometry.log import set_root_logger
-from dense_visual_odometry.utils.lie_algebra import SE3
+from dense_visual_odometry.utils.lie_algebra import Se3, So3
 from dense_visual_odometry.utils.image_pyramid import pyrDownMedianSmooth
 
 
@@ -46,7 +45,7 @@ def parse_arguments():
         type=args.benchmark, data_dir=args.data_dir, size=args.size
     )
 
-    init_pose = gt_transforms[0] if gt_transforms[0] is not None else np.zeros((6, 1), dtype=np.float32)
+    init_pose = gt_transforms[0] if gt_transforms[0] is not None else Se3.identity()
 
     config = {}
     if args.config_file is not None:
@@ -136,11 +135,11 @@ def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path, pyr_down:
 
             # If groundtruth then save se(3) pose
             if filename == "groundtruth.txt":
-                # Ground truth is given as tx, ty, tz, qx, qy, qz, qw
-                T = np.eye(4, dtype=np.float32)
-                T[:3, 3] = np.asarray(line_stripped[1:4])
-                T[:3, :3] = rot.from_quat(np.asarray(line_stripped[4:])).as_matrix()
-                data.append(SE3.log(T))
+                pose = Se3(
+                    So3(np.roll(np.asarray(line_stripped[4:], dtype=np.float32), 1).reshape(4, 1)),
+                    np.asarray(line_stripped[1:4], dtype=np.float32).reshape(3, 1)
+                )
+                data.append(pose)
 
             else:
                 image_path = data_path / line_stripped[1]
@@ -239,7 +238,8 @@ def _load__test_benchmark(data_path: Path = None, size: int = None):
     for i, value in enumerate(data.values()):
         if available_gt:
             try:
-                transformations.append(SE3.log(np.array(value["transformation"])))
+                xi = np.array(value["transformation"]).reshape(6, 1)
+                transformations.append(Se3(So3(xi[3:]), xi[:3]))
             except KeyError as e:
                 logger.info("Could not find ground truth transform under '{}' at '{}'".format(
                     e, str(data_path)
@@ -294,8 +294,8 @@ def main():
 
         # Error is only the euclidean distance (not taking rotation into account)
         if gt_transform is not None:
-            t_error = float(np.linalg.norm(dvo.current_pose[:3] - gt_transform[:3]))
-            r_error = float(np.linalg.norm(dvo.current_pose[3:] - gt_transform[3:]))
+            t_error = float(np.linalg.norm(dvo.current_pose.tvec - gt_transform.tvec))
+            r_error = float(np.linalg.norm(dvo.current_pose.so3.log() - gt_transform.so3.log()))
             logger.info("[Frame {} ({:.3f} s)] | Translational error: {:.4f} m | Rotational error: {:.4f}".format(
                 i + 1, e - s, t_error, r_error
             ))
@@ -304,7 +304,7 @@ def main():
             r_error = "N/A"
             logger.info("[Frame {} ({:.3f} s)]".format(i + 1, e - s))
 
-        steps.append(dvo.current_pose.reshape(-1).tolist())
+        steps.append(dvo.current_pose.log().flatten().tolist())
         errors.append(t_error)
 
     # Dump results

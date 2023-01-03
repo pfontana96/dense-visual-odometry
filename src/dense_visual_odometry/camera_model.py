@@ -4,9 +4,8 @@ import logging
 import yaml
 from typing import Union
 
-import cupy as cp  # noqa
+# import cupy as cp  # noqa
 
-from dense_visual_odometry.utils.lie_algebra import SE3
 from dense_visual_odometry.utils.numpy_cache import np_cache
 
 
@@ -28,7 +27,7 @@ class RGBDCameraModel:
 
     def __init__(
         self, intrinsics: np.ndarray, depth_scale: float, distorssion_coeffs: Union[np.ndarray, None] = None,
-        distorssion_model: Union[str, None] = None, levels: int = None
+        distorssion_model: Union[str, None] = None
     ):
         """
             Creates a RGBDCameraModel instance
@@ -113,7 +112,7 @@ class RGBDCameraModel:
 
     # NOTE: Does compute invalid depth, user must do it
     def deproject_unsafe(
-        self, depth_image: np.ndarray, camera_pose: np.ndarray, mask: np.ndarray, level: int = 0
+        self, depth_image: np.ndarray, mask: np.ndarray, level: int = 0
     ):
         """
             Deprojects a depth image into the World reference frame without taking into account no valid
@@ -164,25 +163,19 @@ class RGBDCameraModel:
 
         pointcloud = np.vstack((points[0, :] * z, points[1, :] * z, z, np.ones_like(z)))
 
-        # Convert from camera reference frame to world reference frame
-        pointcloud = np.dot(SE3.exp(camera_pose), pointcloud)
-
         return pointcloud
 
     @np_cache
     def deproject(
-        self, depth_image: np.ndarray, camera_pose: np.ndarray, return_mask: bool = False, level: int = 0,
-        mask_pixels: np.ndarray = None
+        self, depth_image: np.ndarray, return_mask: bool = False, level: int = 0, mask_pixels: np.ndarray = None
     ):
         """
-            Deprojects a depth image into the World reference frame
+            Deprojects a depth image into the camera reference frame
 
         Parameters
         ----------
         depth_image : np.ndarray
             Depth image (with invalid pixels defined with the value 0)
-        camera_pose : np.ndarray
-            Camera pose w.r.t World coordinate frame expressed as a 6x1 se(3) vector
         return_mask : bool
             if True, then a bolean mask is returned with valid pixels
 
@@ -224,16 +217,12 @@ class RGBDCameraModel:
 
         pointcloud = np.vstack((points[0, :] * z, points[1, :] * z, z, np.ones_like(z)))
 
-        # Convert from camera reference frame to world reference frame
-        pointcloud = np.dot(SE3.exp(camera_pose), pointcloud)
-
         if return_mask:
             return (pointcloud, mask.reshape(depth_image.shape))
 
         return pointcloud
 
-    @np_cache
-    def project(self, pointcloud: np.ndarray, camera_pose: np.ndarray, level: int = 0):
+    def project(self, pointcloud: np.ndarray, level: int = 0):
         """
             Projects given pointcloud to image plane
 
@@ -254,8 +243,7 @@ class RGBDCameraModel:
         """
         intrinsics = self.at(level)
 
-        camera_matrix = np.dot(intrinsics, SE3.inverse(SE3.exp(camera_pose)))
-        points_pixels = np.dot(camera_matrix, pointcloud)
+        points_pixels = np.dot(intrinsics, pointcloud)
         points_pixels /= points_pixels[2, :]
 
         return points_pixels

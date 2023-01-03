@@ -1,13 +1,11 @@
-from typing import Union
-
 import numpy as np
-import cupy as cp
+# import cupy as cp
 import cv2
 
 
 def compute_jacobian_of_warp_function(
-    pointcloud: Union[np.ndarray, cp.ndarray], calibration_matrix: Union[np.ndarray, cp.ndarray], use_gpu: bool = False
-) -> Union[np.ndarray, cp.ndarray]:
+    pointcloud: np.ndarray, calibration_matrix: np.ndarray, use_gpu: bool = False
+) -> np.ndarray:
     """
         Computes the Jacobian of a warp function
 
@@ -24,8 +22,6 @@ def compute_jacobian_of_warp_function(
     points coordinates, `J_g` is the 3x12 Jacobian of the rigid body transformation with respect to its 12 parameters
     and `J_G` is the 12x6 Jacobian matrix of the exponential map (Lie Algebra). So `J_w` is a 2x6 matrix
     """
-    module = np if not use_gpu else cp
-
     fx = calibration_matrix[0, 0]
     fy = calibration_matrix[1, 1]
 
@@ -33,15 +29,15 @@ def compute_jacobian_of_warp_function(
     y = pointcloud[1, :]
     z = pointcloud[2, :]
 
-    zeros = module.zeros_like(x)
+    zeros = np.zeros_like(x)
 
-    J_w = module.array([
+    J_w = np.array([
         [fx / z, zeros, -fx * x / z ** 2, -fx * (x * y) / z ** 2, fx * (1 + (x ** 2 / z ** 2)), -fx * y / z],
         [zeros, fy / z, -fy * y / z ** 2, -fy * (1 + (y ** 2 / z ** 2)), fy * (x * y) / z ** 2, fy * x / z]
-    ], dtype=module.float32)
+    ], dtype=np.float32)
 
     # Transpose array to be of shape Nx2x6
-    J_w = module.transpose(J_w, [2, 0, 1])
+    J_w = np.transpose(J_w, [2, 0, 1])
 
     return J_w
 

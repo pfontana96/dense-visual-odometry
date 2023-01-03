@@ -11,7 +11,7 @@ import cv2
 import open3d as o3d
 from tqdm import tqdm
 
-from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import SE3
+from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import Se3, So3
 from dense_visual_odometry.log import set_root_logger
 from dense_visual_odometry.camera_model import RGBDCameraModel
 
@@ -96,7 +96,8 @@ def load_from_report(report_path: Path):
         ), ascii=True, desc="Loading images from report.."):
             rgb_images.append(cv2.cvtColor(cv2.imread(rgb_image_path, cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB))
             depth_images.append(cv2.imread(str(depth_image_path), cv2.IMREAD_ANYDEPTH))
-            estimated_transforms.append(np.array(transform, dtype=np.float32).reshape(6, 1))
+            xi = np.array(transform, dtype=np.float32).reshape(6, 1)
+            estimated_transforms.append(Se3(So3(xi[3:]), xi[3:]))
 
         camera_model = RGBDCameraModel.load_from_yaml(Path(data["camera_intrinsics"]).resolve())
 
@@ -113,9 +114,6 @@ def main():
     transformations, rgb_images, depth_images, camera_model, plot_t, absolute, fps = parse_arguments()
 
     animate3d(rgb_images, depth_images, transformations, camera_model, absolute_transforms=absolute, fps=fps)
-
-    if plot_t:
-        plot_trajectory(transformations, absolute_transforms=absolute)
 
 
 def animate3d(
@@ -137,26 +135,33 @@ def animate3d(
 
     max_distance = 5  # [m]
 
-    for i, (rgb_image, depth_image, transform) in enumerate(zip(rgb_images, depth_images, transforms)):
+    for i, (rgb_image, depth_image, xi_t) in enumerate(zip(rgb_images, depth_images, transforms)):
         start = time.time()
 
         # Filter noisy points of sensor
         depth_image[(depth_image * camera_model.depth_scale) > max_distance] = 0
 
-        pointcloud_xyz, mask = camera_model.deproject(depth_image=depth_image, camera_pose=transform, return_mask=True)
+        # Update camera pose
+        if absolute_transforms and (i != 0):
+            xi_t_1 = transforms[i - 1]
+            xi = xi_t.inverse() * xi_t_1
+        else:
+            # xi = transform.copy()
+            xi = xi_t
+
+        camera_pose.transform(xi.exp())
+        # camera_pose.rotate(xi.so3.exp())
+        # camera_pose.translate(xi.tvec)
+        pointcloud_xyz, mask = camera_model.deproject(depth_image=depth_image, return_mask=True)
+
+        # Transform pointcloud from camera reference frame to world
+        pointcloud_xyz = np.dot(xi_t.exp(), pointcloud_xyz)
+
         pointcloud_colors = rgb_image[mask]
 
         # Update Pointcloud
         pcd.points = o3d.utility.Vector3dVector(pointcloud_xyz[:3, :].T)
         pcd.colors = o3d.utility.Vector3dVector(pointcloud_colors / 255.0)
-
-        # Update camera pose
-        if absolute_transforms and (i != 0):
-            T = np.dot(SE3.inverse(SE3.exp(transform)), SE3.exp(transforms[i - 1]))
-        else:
-            T = SE3.exp(transform)
-
-        camera_pose.transform(T)
 
         if i == 0:
             # Change channels on initial_pcd to being able to differenciate it from other pointclouds as to use it as
@@ -181,17 +186,6 @@ def animate3d(
 
     vis.destroy_window()
     # o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Info)
-
-
-def plot_trajectory(transforms: List[np.ndarray], absolute_transforms: bool):
-    points = o3d.utility.Vector3dVector(np.array(transforms)[:, :3].squeeze())
-    indices = o3d.utility.Vector2iVector(
-        np.hstack((np.arange(len(transforms) - 1).reshape(-1, 1), np.arange(len(transforms) - 1).reshape(-1, 1) + 1))
-    )
-    lineset = o3d.geometry.LineSet(points=points, lines=indices)
-
-    o3d.visualization.get_render_option
-    o3d.visualization.draw_geometries([lineset])
 
 
 if __name__ == "__main__":
