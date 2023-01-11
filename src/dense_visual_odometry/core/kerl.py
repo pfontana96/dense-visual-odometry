@@ -259,108 +259,116 @@ class KerlDVO(BaseDenseVisualOdometry):
             levels=self.levels
         )
 
-        old = self._current_pose.copy()
         estimate = init_guess.copy()
-        initial = init_guess.copy()
 
         for level, (gray_image_l, gray_image_prev_l, depth_image_l, depth_image_prev_l) in enumerate(image_pyramids):
 
             self._init_gray_image_interpolator(gray_image_l)
-            self._init_gradients_interpolators(gray_image_l)
+            if not self._approximate_image2_gradients:
+                self._init_gradients_interpolators(gray_image_l)
 
-            # estimate = self._damped_least_squares(
-            #     gray_image=gray_image,
-            #     gray_image_prev=gray_image_prev,
-            #     depth_image_prev=depth_image_prev,
-            #     init_guess=estimate,
-            #     level=level
-            # )
-
-            err_prev = np.finfo("float32").max
-            err_increased_count = 0
-
-            for i in range(self._max_iter):
-
-                # Compute residuals
-                residuals, jacobian = self._compute_residuals(
-                    gray_image=gray_image_l, gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l,
-                    estimate=estimate, level=level
-                )
-                jacobian_t = jacobian.T.copy()
-
-                # Computes weights if required
-                if self._weighter is not None:
-
-                    residuals_squared = residuals * residuals
-
-                    weights = self._weighter.weight(residuals_squared=residuals_squared)
-
-                    err = np.mean(weights * residuals_squared)
-
-                    residuals = weights * residuals
-                    jacobian = weights * jacobian
-
-                else:
-                    err = np.mean(residuals ** 2)
-
-                # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
-                H = np.dot(jacobian_t, jacobian)
-                b = - np.dot(jacobian_t, residuals)
-
-                if self._sigma is not None:
-                    # maybe_old = SE3.log(np.dot(SE3.inverse(SE3.exp(estimate)), SE3.exp(self._current_pose)))
-                    H += self._inv_cov
-                    b += np.dot(self._inv_cov, old.log())
-
-                    err += 0.5 * self._sigma * np.linalg.norm(old.log())
-
-                if self._mu is not None:
-                    err += 0.5 * self._mu * np.linalg.norm(initial.log())
-
-                inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b)
-
-                inc = Se3.from_se3(inc_xi)
-
-                err_diff = err - err_prev
-
-                logger.debug("Iteration {} -> error: {:.4f}".format(i + 1, err))
-
-                if abs(err_diff) < self._tolerance:
-                    logger.info("Found convergence on iteration {} (error: {:.4f})".format(i + 1, err))
-                    break
-
-                # Stopping criteria (error function always displays a global minima)
-                if (err_diff < 0.0):
-                    # Error decreased, so compute increment
-                    estimate = inc * estimate
-                    err_prev = err
-
-                    if self._sigma is not None:
-                        old = inc.inverse() * old
-
-                    if self._mu is not None:
-                        initial = inc.inverse() * initial
-
-                    err_increased_count = 0
-
-                else:
-                    err_increased_count += 1
-
-                if err_increased_count > self._max_increased_steps_allowed:
-                    logger.info("Error increased on iteration '{}' (error: {:.4f})".format(i, err))
-                    break
-
-                if i == (self._max_iter - 1):
-                    logger.warning("Exceeded maximum number of iterations '{}' (error: {:.4f})".format(
-                        self._max_iter, err
-                    ))
+            estimate = self._non_linear_least_squares(
+                init_guess=estimate, gray_image=gray_image_l, depth_image=depth_image_l,
+                gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l, level=level
+            )
 
             self._clear_gray_image_interpolator()
             self._clear_gradients_interpolators()
 
         # Clean cache
         self._camera_model.deproject.cache_clear()
-        self._compute_jacobian_approximate_I2.cache_clear()
+        if not self._approximate_image2_gradients:
+            self._compute_jacobian_approximate_I2.cache_clear()
         compute_jacobian_of_warp_function.cache_clear()
+
+        return estimate
+
+    def _non_linear_least_squares(
+        self, init_guess: Se3, gray_image: np.ndarray, gray_image_prev: np.ndarray, depth_image: np.ndarray,
+        depth_image_prev: np.ndarray, level: int = 0
+    ):
+
+        old = self._current_pose.copy()
+        estimate = init_guess.copy()
+        initial = init_guess.copy()
+
+        err_prev = np.finfo("float32").max
+        err_increased_count = 0
+
+        for i in range(self._max_iter):
+
+            # Compute residuals
+            residuals, jacobian = self._compute_residuals(
+                gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
+                estimate=estimate, level=level
+            )
+            jacobian_t = jacobian.T.copy()
+
+            # Computes weights if required
+            if self._weighter is not None:
+
+                residuals_squared = residuals * residuals
+
+                weights = self._weighter.weight(residuals_squared=residuals_squared)
+
+                err = np.mean(weights * residuals_squared)
+
+                residuals = weights * residuals
+                jacobian = weights * jacobian
+
+            else:
+                err = np.mean(residuals ** 2)
+
+            # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
+            H = np.dot(jacobian_t, jacobian)
+            b = - np.dot(jacobian_t, residuals)
+
+            if self._sigma is not None:
+                # maybe_old = SE3.log(np.dot(SE3.inverse(SE3.exp(estimate)), SE3.exp(self._current_pose)))
+                H += self._inv_cov
+                b += np.dot(self._inv_cov, old.log())
+
+                err += 0.5 * self._sigma * np.linalg.norm(old.log())
+
+            if self._mu is not None:
+                err += 0.5 * self._mu * np.linalg.norm(initial.log())
+
+            inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b)
+
+            inc = Se3.from_se3(inc_xi)
+
+            err_diff = err - err_prev
+
+            logger.debug("Iteration {} -> error: {:.4f}".format(i + 1, err))
+
+            if abs(err_diff) < self._tolerance:
+                logger.info("Found convergence on iteration {} (error: {:.4f})".format(i + 1, err))
+                break
+
+            # Stopping criteria (error function always displays a global minima)
+            if (err_diff < 0.0):
+                # Error decreased, so compute increment
+                estimate = inc * estimate
+                err_prev = err
+
+                if self._sigma is not None:
+                    old = inc.inverse() * old
+
+                if self._mu is not None:
+                    initial = inc.inverse() * initial
+
+                err_increased_count = 0
+
+            else:
+                err_increased_count += 1
+
+            if err_increased_count > self._max_increased_steps_allowed:
+                logger.info("Error increased on iteration '{}' (error: {:.4f})".format(i, err))
+                break
+
+            if i == (self._max_iter - 1):
+                logger.warning("Exceeded maximum number of iterations '{}' (error: {:.4f})".format(
+                    self._max_iter, err
+                ))
 
         return estimate

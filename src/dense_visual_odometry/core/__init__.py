@@ -1,5 +1,5 @@
 from dense_visual_odometry.core.kerl import KerlDVO  # noqa
-from dense_visual_odometry.core.loftr import LoFTRDVO  # noqa
+# from dense_visual_odometry.core.loftr import LoFTRDVO  # noqa
 from dense_visual_odometry.camera_model import RGBDCameraModel
 
 import numpy as np
@@ -7,7 +7,7 @@ import numpy as np
 
 _SUPPORTED_METHODS = {
     "kerl": KerlDVO,
-    "loftr": LoFTRDVO
+    # "loftr": LoFTRDVO
 }
 
 
