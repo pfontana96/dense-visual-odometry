@@ -30,6 +30,7 @@ class TestDVO:
         # When
         dvo = KerlDVO(self.perfect_camera_model, Se3.identity(), 1)
         dvo._init_gray_image_interpolator(gray_image)
+        dvo._init_gradients_interpolators(gray_image)
         residuals, _ = dvo._compute_residuals(gray_image, gray_image, depth_image, estimate=Se3.identity())
 
         # Then
@@ -53,6 +54,7 @@ class TestDVO:
         # When
         dvo = KerlDVO(camera_model, transformations[0], 1)
         dvo._init_gray_image_interpolator(gray_images[1])
+        dvo._init_gradients_interpolators(gray_images[1])
         residuals, _ = dvo._compute_residuals(gray_images[1], gray_images[0], depth_images[0], estimate=gt_transform)
 
         mask = depth_images[0] != 0

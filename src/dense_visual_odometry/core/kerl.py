@@ -40,7 +40,7 @@ class KerlDVO(BaseDenseVisualOdometry):
     def __init__(
         self, camera_model: RGBDCameraModel, initial_pose: Se3, levels: int, use_weighter: bool = False,
         max_increased_steps_allowed: int = 0, sigma: float = None, use_gpu: bool = False, tolerance: float = 1e-6,
-        max_iterations: int = 100, mu: float = None
+        max_iterations: int = 100, mu: float = None, approximate_image2_gradient: bool = False
     ):
         """
         Parameters
@@ -72,16 +72,41 @@ class KerlDVO(BaseDenseVisualOdometry):
 
         self._gray_image_interpolator = None
 
+        self._grady_interpolator = None
+        self._gradx_interpolator = None
+
+        self._approximate_image2_gradients = approximate_image2_gradient
+
     def _init_gray_image_interpolator(self, gray_image: np.ndarray):
 
         height, width = gray_image.shape
         self._gray_image_interpolator = RegularGridInterpolator(
             points=(np.arange(height, dtype=int), np.arange(width, dtype=int)),
-            values=gray_image, method="linear"
+            values=gray_image, method="linear", bounds_error=False
         )
 
     def _clear_gray_image_interpolator(self):
         self._gray_image_interpolator = None
+
+    def _init_gradients_interpolators(self, gray_image: np.ndarray):
+
+        height, width = gray_image.shape
+
+        gradx, grady = compute_gradients(image=gray_image, kernel_size=3)
+
+        self._gradx_interpolator = RegularGridInterpolator(
+            points=(np.arange(height, dtype=int), np.arange(width, dtype=int)),
+            values=gradx, method="linear", bounds_error=False
+        )
+
+        self._grady_interpolator = RegularGridInterpolator(
+            points=(np.arange(height, dtype=int), np.arange(width, dtype=int)),
+            values=grady, method="linear", bounds_error=False
+        )
+
+    def _clear_gradients_interpolators(self):
+        self._gradx_interpolator = None
+        self._grady_interpolator = None
 
     # TODO: Update doc
     def _compute_residuals(
@@ -130,40 +155,47 @@ class KerlDVO(BaseDenseVisualOdometry):
         # Deproject image into 3d space w.r.t the first camera position
         pointcloud, mask = self._camera_model.deproject(depth_image_prev, return_mask=True, level=level)
 
-        # NOTE: `_compute_jacobian_approximate_I2` is cached so it's not being computed every iteration
-        # NOTE: Normally the jacobian to use is J = J_i(w(se3, x)) * Jw where only Jw is a constant term. Nonetheless
-        # `J_i(w(se3, x)) = [I2x(w(se3, x)), I2y(w(se3, x))].T`
-        # can be approximated by J_i = [I1x(x), I1y(x)] which allows us NOT to recompute J_i at every iteration
-        jacobian = self._compute_jacobian_approximate_I2(
-            image=gray_image_prev, depth_image=depth_image_prev, level=level
-        )
+        if self._approximate_image2_gradients:
+            # NOTE: `_compute_jacobian_approximate_I2` is cached so it's not being computed every iteration
+            # NOTE: Normally the jacobian to use is J = J_i(w(se3, x)) * Jw where only Jw is a constant term.
+            # Nonetheless `J_i(w(se3, x)) = [I2x(w(se3, x)), I2y(w(se3, x))].T`
+            # can be approximated by `J_i = [I1x(x), I1y(x)].T` which allows us NOT to recompute J_i at every iteration
+            jacobian = self._compute_jacobian_approximate_I2(
+                image=gray_image_prev, depth_image=depth_image_prev, level=level
+            )
+
+        else:
+            J_w = compute_jacobian_of_warp_function(
+                pointcloud=pointcloud, calibration_matrix=self._camera_model.at(level)
+            )
 
         # Transform pointcloud to second camera frame using estimated rigid motion
         pointcloud = np.dot(estimate.exp(), pointcloud)
 
         # Warp I1 pixels
         warped_pixels = self._camera_model.project(pointcloud, level=level)
+        warped_pixels_intensities = self._gray_image_interpolator(np.roll(warped_pixels[:2, :].T, 1, axis=1))
+        valid_warped_pixels_mask = ~np.isnan(warped_pixels_intensities).flatten()
+
+        if not self._approximate_image2_gradients:
+            jacobian = self._compute_jacobian(J_w, warped_pixels[:, valid_warped_pixels_mask])
+
+        else:
+            jacobian = jacobian[valid_warped_pixels_mask]
 
         # Interpolate intensity values on I2 for warped pixels projected coordinates
-        height, width = gray_image.shape
-        residuals = (
-            self._gray_image_interpolator(
-                np.clip(
-                    np.roll(warped_pixels[:2, :].T, 1, axis=1),
-                    a_min=[0, 0], a_max=[height - 1, width - 1], dtype=np.float32
-                )
-            ) - gray_image_prev[mask]
+        residuals_intensity = (
+            warped_pixels_intensities[valid_warped_pixels_mask] - gray_image_prev[mask][valid_warped_pixels_mask]
         ).reshape(-1, 1)
 
-        logger.debug(f"Residuals (min, max, mean): ({residuals.min()}, {residuals.max()}, {residuals.mean()})")
+        logger.debug("Intensity Residuals (min, max, mean): ({}, {}, {})".format(
+            residuals_intensity.min(), residuals_intensity.max(), residuals_intensity.mean()
+        ))
 
-        # jacobian = self._compute_jacobian(image=gray_image, J_w=J_w, warped_pixels=warped_pixels)
-
-        return residuals, jacobian
+        return residuals_intensity, jacobian
 
     # TODO: Fix documentation
-    @staticmethod
-    def _compute_jacobian(image: np.ndarray, J_w: np.ndarray, warped_pixels: np.ndarray):
+    def _compute_jacobian(self, J_w: np.ndarray, warped_pixels: np.ndarray):
         """
             Computes the jacobian of an image with respect to a camera pose as: `J = Jl*Jw` where `Jl` is a Nx2 matrix
             containing the gradients of `image` along the x and y directions and `Jw` is a 2x6 matrix containing the
@@ -184,27 +216,8 @@ class KerlDVO(BaseDenseVisualOdometry):
         J : np.ndarray
             NX6 array containing the jacobian of `image` with respect to the six parameters of `camera_pose`
         """
-        height, width = image.shape
-
-        gradx, grady = compute_gradients(image=image, kernel_size=3)
-
-        interp_gradx = RegularGridInterpolator(
-            points=(np.arange(height, dtype=int), np.arange(width, dtype=int)),
-            values=gradx, method="linear"
-        )
-
-        interp_grady = RegularGridInterpolator(
-            points=(np.arange(height, dtype=int), np.arange(width, dtype=int)),
-            values=grady, method="linear"
-        )
-
-        gradx_values = interp_gradx(
-                np.clip(np.roll(warped_pixels[:2, :].T, 1, axis=1), a_min=[0, 0], a_max=[height - 1, width - 1])
-            ).astype(np.float32).reshape(-1, 1)
-
-        grady_values = interp_grady(
-                np.clip(np.roll(warped_pixels[:2, :].T, 1, axis=1), a_min=[0, 0], a_max=[height - 1, width - 1])
-            ).astype(np.float32).reshape(-1, 1)
+        gradx_values = self._gradx_interpolator(np.roll(warped_pixels[:2, :].T, 1, axis=1)).reshape(-1, 1)
+        grady_values = self._grady_interpolator(np.roll(warped_pixels[:2, :].T, 1, axis=1)).reshape(-1, 1)
 
         J = np.zeros((gradx_values.size, 6), dtype=np.float32)
         for i, gradients in enumerate(np.hstack((gradx_values, grady_values))):
@@ -242,7 +255,7 @@ class KerlDVO(BaseDenseVisualOdometry):
     def _step(self, gray_image: np.ndarray, depth_image: np.ndarray, init_guess: Se3 = Se3.identity()):
         # Create coarse to fine Image Pyramids
         image_pyramids = CoarseToFineMultiImagePyramid(
-            images=[gray_image, self._gray_image_prev, self._depth_image_prev],
+            images=[gray_image, self._gray_image_prev, depth_image, self._depth_image_prev],
             levels=self.levels
         )
 
@@ -250,19 +263,27 @@ class KerlDVO(BaseDenseVisualOdometry):
         estimate = init_guess.copy()
         initial = init_guess.copy()
 
-        for level, (gray_image, gray_image_prev, depth_image_prev) in enumerate(image_pyramids):
+        for level, (gray_image_l, gray_image_prev_l, depth_image_l, depth_image_prev_l) in enumerate(image_pyramids):
 
-            self._init_gray_image_interpolator(gray_image)
+            self._init_gray_image_interpolator(gray_image_l)
+            self._init_gradients_interpolators(gray_image_l)
+
+            # estimate = self._damped_least_squares(
+            #     gray_image=gray_image,
+            #     gray_image_prev=gray_image_prev,
+            #     depth_image_prev=depth_image_prev,
+            #     init_guess=estimate,
+            #     level=level
+            # )
 
             err_prev = np.finfo("float32").max
-            jacobian = None
             err_increased_count = 0
 
             for i in range(self._max_iter):
 
                 # Compute residuals
                 residuals, jacobian = self._compute_residuals(
-                    gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
+                    gray_image=gray_image_l, gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l,
                     estimate=estimate, level=level
                 )
                 jacobian_t = jacobian.T.copy()
@@ -271,8 +292,11 @@ class KerlDVO(BaseDenseVisualOdometry):
                 if self._weighter is not None:
 
                     residuals_squared = residuals * residuals
+
                     weights = self._weighter.weight(residuals_squared=residuals_squared)
+
                     err = np.mean(weights * residuals_squared)
+
                     residuals = weights * residuals
                     jacobian = weights * jacobian
 
@@ -293,7 +317,7 @@ class KerlDVO(BaseDenseVisualOdometry):
                 if self._mu is not None:
                     err += 0.5 * self._mu * np.linalg.norm(initial.log())
 
-                inc_xi, _, _, _ = np.linalg.lstsq(H, b, rcond=1e-6)
+                inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b)
 
                 inc = Se3.from_se3(inc_xi)
 
@@ -302,11 +326,11 @@ class KerlDVO(BaseDenseVisualOdometry):
                 logger.debug("Iteration {} -> error: {:.4f}".format(i + 1, err))
 
                 if abs(err_diff) < self._tolerance:
-                    logger.info("Found convergence on iteration {}".format(i + 1))
+                    logger.info("Found convergence on iteration {} (error: {:.4f})".format(i + 1, err))
                     break
 
                 # Stopping criteria (error function always displays a global minima)
-                if err_diff < 0.0:
+                if (err_diff < 0.0):
                     # Error decreased, so compute increment
                     estimate = inc * estimate
                     err_prev = err
@@ -323,17 +347,20 @@ class KerlDVO(BaseDenseVisualOdometry):
                     err_increased_count += 1
 
                 if err_increased_count > self._max_increased_steps_allowed:
-                    logger.info("Error increased on iteration '{}'".format(i))
+                    logger.info("Error increased on iteration '{}' (error: {:.4f})".format(i, err))
                     break
 
                 if i == (self._max_iter - 1):
-                    logger.warning("Exceeded maximum number of iterations ({})".format(self._max_iter))
+                    logger.warning("Exceeded maximum number of iterations '{}' (error: {:.4f})".format(
+                        self._max_iter, err
+                    ))
 
             self._clear_gray_image_interpolator()
+            self._clear_gradients_interpolators()
 
         # Clean cache
         self._camera_model.deproject.cache_clear()
-        # self._camera_model.project.cache_clear()
         self._compute_jacobian_approximate_I2.cache_clear()
+        compute_jacobian_of_warp_function.cache_clear()
 
         return estimate

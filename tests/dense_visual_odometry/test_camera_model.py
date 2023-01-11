@@ -165,7 +165,7 @@ class TestRGBDCameraModel:
         depth_scale = 0.5
 
         x, y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
-        z = np.arange(height * width).reshape(1, -1)
+        z = np.arange(height * width).reshape(1, -1) + 1.0
         pointcloud = np.vstack(
             (x.reshape(1, -1), y.reshape(1, -1), z, np.ones((1, height * width), dtype=np.float32))
         )

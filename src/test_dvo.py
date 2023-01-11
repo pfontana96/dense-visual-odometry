@@ -170,6 +170,7 @@ def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path, pyr_down:
     logger.info("DONE")
 
     gt_transforms = list(filedata["groundtruth"]["data"][closests_groundtruth])
+    gt_timestamps = list(filedata["groundtruth"]["timestamp"][closests_groundtruth])
 
     if (size is not None) and (size < len(rgb_images_paths)):
         gt_transforms = gt_transforms[:size]
@@ -180,7 +181,7 @@ def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path, pyr_down:
     depth_images = []
     for rgb_path, depth_path in tqdm(zip(rgb_images_paths, depth_images_paths), ascii=True, desc="Loading images"):
         rgb_image = cv2.cvtColor(cv2.imread(rgb_path, cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB)
-        depth_image = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH)
+        depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
 
         if pyr_down:
             rgb_image = pyrDownMedianSmooth(image=rgb_image)
@@ -193,8 +194,10 @@ def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path, pyr_down:
 
     # Additional data needed for report
     additional_info = {
+        "type": "TUM",
         "rgb": rgb_images_paths.tolist(), "depth": depth_images_paths.tolist(),
-        "camera_intrinsics": str(camera_intrinsics_file)
+        "camera_intrinsics": str(camera_intrinsics_file),
+        "timestamps": gt_timestamps
     }
 
     return gt_transforms, rgb_images, depth_images, camera_model, additional_info
@@ -251,6 +254,7 @@ def _load__test_benchmark(data_path: Path = None, size: int = None):
         )
         depth_images.append(cv2.imread(str(data_path / value["depth"]), cv2.IMREAD_ANYDEPTH))
 
+        additional_info["type"] = "TEST"
         additional_info["rgb"].append(str(data_path / value["rgb"]))
         additional_info["depth"].append(str(data_path / value["depth"]))
 
@@ -315,6 +319,17 @@ def main():
 
     with output_file.open("w") as fp:
         json.dump(report, fp, indent=3)
+
+    # Create txt for comparing with TUM benchmarks
+    if report["type"] == "TUM":
+        with output_file.with_suffix(".txt").open("w") as fp:
+            fp.write("# timestamp tx ty tz qx qy qz qw\n")
+
+            for ts, transform in zip(additional_info["timestamps"], steps):
+                pose = Se3.from_se3(np.array(transform, dtype=np.float32).reshape(6, 1))
+                pose_txt = [str(ts)] + pose.tvec.flatten().tolist() + np.roll(pose.so3.quat, -1).flatten().tolist()
+                fp.write(" ".join((str(el) for el in pose_txt)))
+                fp.write("\n")
 
 
 if __name__ == "__main__":
