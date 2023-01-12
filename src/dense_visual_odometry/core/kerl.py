@@ -1,6 +1,7 @@
 import logging
 
 import numpy as np
+from numba import cuda
 from scipy.interpolate import RegularGridInterpolator
 
 from dense_visual_odometry.core.base_dense_visual_odometry import BaseDenseVisualOdometry
@@ -10,6 +11,7 @@ from dense_visual_odometry.utils.jacobian import compute_jacobian_of_warp_functi
 from dense_visual_odometry.utils.numpy_cache import np_cache
 from dense_visual_odometry.camera_model import RGBDCameraModel
 from dense_visual_odometry.weighter.t_weighter import TDistributionWeighter
+from dense_visual_odometry.cuda import CUDA_BLOCKSIZE, residuals_kernel, weighting_kernel
 
 
 logger = logging.getLogger(__name__)
@@ -263,23 +265,202 @@ class KerlDVO(BaseDenseVisualOdometry):
 
         for level, (gray_image_l, gray_image_prev_l, depth_image_l, depth_image_prev_l) in enumerate(image_pyramids):
 
-            self._init_gray_image_interpolator(gray_image_l)
-            if not self._approximate_image2_gradients:
-                self._init_gradients_interpolators(gray_image_l)
+            if self._use_gpu:
+                estimate = self._non_linear_least_squares_gpu(
+                    init_guess=estimate, gray_image=gray_image_l, depth_image=depth_image_l,
+                    gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l, level=level
+                )
 
-            estimate = self._non_linear_least_squares(
-                init_guess=estimate, gray_image=gray_image_l, depth_image=depth_image_l,
-                gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l, level=level
+            else:
+                self._init_gray_image_interpolator(gray_image_l)
+                if not self._approximate_image2_gradients:
+                    self._init_gradients_interpolators(gray_image_l)
+
+                estimate = self._non_linear_least_squares(
+                    init_guess=estimate, gray_image=gray_image_l, depth_image=depth_image_l,
+                    gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l, level=level
+                )
+
+                self._clear_gray_image_interpolator()
+                self._clear_gradients_interpolators()
+
+        # Clean cache (only used when running on CPU)
+        if not self._use_gpu:
+            self._camera_model.deproject.cache_clear()
+            if not self._approximate_image2_gradients:
+                self._compute_jacobian_approximate_I2.cache_clear()
+            compute_jacobian_of_warp_function.cache_clear()
+
+        return estimate
+
+    def _non_linear_least_squares_gpu(
+        self, init_guess: Se3, gray_image: np.ndarray, gray_image_prev: np.ndarray, depth_image: np.ndarray,
+        depth_image_prev: np.ndarray, level: int = 0
+    ):
+
+        old = self._current_pose.copy()
+        estimate = init_guess.copy()
+        initial = init_guess.copy()
+
+        err_prev = np.finfo("float32").max
+        err_increased_count = 0
+
+        
+        height, width = gray_image.shape
+
+        residuals_complete = np.zeros(gray_image.shape, dtype=np.float32, order="C")
+        mask = np.zeros(gray_image.shape, dtype=bool, order="C")
+        jacobian_complete = np.zeros((gray_image.size, 6), dtype=np.float32, order="C")
+
+        if self._weighter is not None:
+            weights_complete = np.zeros_like(residuals_complete, order="C")
+
+        gray_image = np.ascontiguousarray(gray_image)
+        gray_image_prev = np.ascontiguousarray(gray_image_prev)
+        depth_image_prev = np.ascontiguousarray(depth_image_prev)
+
+        # Images
+        gpu_gray_image_buffer = cuda.mapped_array(
+            (height, width), dtype=np.uint8, strides=None, order='C', stream=0, portable=False, wc=True
+        )
+        gpu_gray_image_buffer[...] = gray_image
+
+        gpu_gray_image_prev_buffer = cuda.mapped_array(
+            (height, width), dtype=np.uint8, strides=None, order='C', stream=0, portable=False, wc=True
+        )
+        gpu_gray_image_prev_buffer[...] = gray_image_prev
+
+        gpu_depth_image_prev_buffer = cuda.mapped_array(
+            (height, width), dtype=np.uint16, strides=None, order='C', stream=0, portable=False, wc=True
+        )
+        gpu_depth_image_prev_buffer[...] = depth_image_prev
+
+        # Estimate
+        gpu_R_buffer = cuda.mapped_array(
+            (3, 3), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+        )
+        gpu_tvec_buffer = cuda.mapped_array(
+            (3,), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+        )
+
+        # Residuals and jacobian
+        gpu_mask_buffer = cuda.mapped_array(
+            (height, width), dtype=bool, strides=None, order='C', stream=0, portable=False, wc=True
+        )
+        gpu_residuals_buffer = cuda.mapped_array(
+            (height, width), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+        )
+        gpu_jacobian_buffer = cuda.mapped_array(
+            (gray_image.size, 6), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+        )
+        
+        gpu_weights_buffer = cuda.mapped_array(
+            weights_complete.shape, dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+        )
+
+        block_dim = (CUDA_BLOCKSIZE, CUDA_BLOCKSIZE)
+        grid_dim = (int((width + (CUDA_BLOCKSIZE - 1)) // CUDA_BLOCKSIZE), int((height + (CUDA_BLOCKSIZE - 1)) // CUDA_BLOCKSIZE))
+
+        for i in range(self._max_iter):
+
+            # Compute residuals
+            T = np.ascontiguousarray(estimate.exp())
+
+            # Update data from estimate to gpu buffers
+            gpu_R_buffer[...] = T[:3, :3]
+            gpu_tvec_buffer[...] = T[:3, 3]
+
+            intrinsics = self._camera_model.at(level)
+
+            residuals_kernel[grid_dim, block_dim](
+                gpu_gray_image_buffer, gpu_gray_image_prev_buffer, gpu_depth_image_prev_buffer, gpu_R_buffer,
+                gpu_tvec_buffer, intrinsics[0, 0], intrinsics[1, 1], intrinsics[0, 2], intrinsics[1, 2],
+                self._camera_model.depth_scale, gpu_mask_buffer, gpu_residuals_buffer, gpu_jacobian_buffer,
+                height, width
             )
 
-            self._clear_gray_image_interpolator()
-            self._clear_gradients_interpolators()
+            cuda.synchronize()
 
-        # Clean cache
-        self._camera_model.deproject.cache_clear()
-        if not self._approximate_image2_gradients:
-            self._compute_jacobian_approximate_I2.cache_clear()
-        compute_jacobian_of_warp_function.cache_clear()
+            residuals_complete[...] = gpu_residuals_buffer
+            jacobian_complete[...] = gpu_jacobian_buffer
+            mask[...] = gpu_mask_buffer
+
+            residuals = residuals_complete[mask].reshape(-1, 1)
+            jacobian = jacobian_complete[mask.reshape(-1)]
+
+            jacobian_t = jacobian.T.copy()
+
+            # Computes weights if required
+            if self._weighter is not None:
+
+                weighting_kernel[grid_dim, block_dim](
+                    gpu_residuals_buffer, gpu_mask_buffer, gpu_weights_buffer, 5.0, 5.0, 1e-3, 100, height, width
+                )
+
+                cuda.synchronize()
+
+                weights_complete[...] = gpu_weights_buffer
+                weights = weights_complete[mask].reshape(-1, 1)
+
+                logger.info("Weights (min, max, mean): ({}, {}, {})".format(weights.min(), weights.max(), weights.mean()))
+
+                residuals = weights * residuals
+                jacobian = weights * jacobian
+
+
+            err = np.mean(residuals ** 2)
+
+            # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
+            H = np.dot(jacobian_t, jacobian)
+            b = - np.dot(jacobian_t, residuals)
+
+            if self._sigma is not None:
+                # maybe_old = SE3.log(np.dot(SE3.inverse(SE3.exp(estimate)), SE3.exp(self._current_pose)))
+                H += self._inv_cov
+                b += np.dot(self._inv_cov, old.log())
+
+                err += 0.5 * self._sigma * np.linalg.norm(old.log())
+
+            if self._mu is not None:
+                err += 0.5 * self._mu * np.linalg.norm(initial.log())
+
+            inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b)
+
+            inc = Se3.from_se3(inc_xi)
+
+            err_diff = err - err_prev
+
+            logger.debug("Iteration {} -> error: {:.4f}".format(i + 1, err))
+
+            if abs(err_diff) < self._tolerance:
+                logger.info("Found convergence on iteration {} (error: {:.4f})".format(i + 1, err))
+                break
+
+            # Stopping criteria (error function always displays a global minima)
+            if (err_diff < 0.0):
+                # Error decreased, so compute increment
+                estimate = inc * estimate
+                err_prev = err
+
+                if self._sigma is not None:
+                    old = inc.inverse() * old
+
+                if self._mu is not None:
+                    initial = inc.inverse() * initial
+
+                err_increased_count = 0
+
+            else:
+                err_increased_count += 1
+
+            if err_increased_count > self._max_increased_steps_allowed:
+                logger.info("Error increased on iteration '{}' (error: {:.4f})".format(i, err))
+                break
+
+            if i == (self._max_iter - 1):
+                logger.warning("Exceeded maximum number of iterations '{}' (error: {:.4f})".format(
+                    self._max_iter, err
+                ))
 
         return estimate
 
@@ -297,7 +478,6 @@ class KerlDVO(BaseDenseVisualOdometry):
 
         for i in range(self._max_iter):
 
-            # Compute residuals
             residuals, jacobian = self._compute_residuals(
                 gray_image=gray_image, gray_image_prev=gray_image_prev, depth_image_prev=depth_image_prev,
                 estimate=estimate, level=level
