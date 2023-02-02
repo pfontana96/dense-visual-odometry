@@ -19,7 +19,7 @@ class TDistributionWeighter(BaseWeighter):
         last_lambda = self._init_lambda
         for _ in range(self._max_iter):
             sigma_2 = np.mean(
-                residuals_squared * ((self._dof + 1) / (self._dof + residuals_squared * last_lambda)) * residuals_squared  # noqa
+                residuals_squared * ((self._dof + 1) / (self._dof + residuals_squared * last_lambda))  # noqa
             )
 
             curr_lambda = 1 / sigma_2

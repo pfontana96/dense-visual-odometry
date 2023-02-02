@@ -11,7 +11,7 @@ import cv2
 import open3d as o3d
 from tqdm import tqdm
 
-from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import Se3, So3
+from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import Se3
 from dense_visual_odometry.log import set_root_logger
 from dense_visual_odometry.camera_model import RGBDCameraModel
 
@@ -97,7 +97,7 @@ def load_from_report(report_path: Path):
             rgb_images.append(cv2.cvtColor(cv2.imread(rgb_image_path, cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB))
             depth_images.append(cv2.imread(str(depth_image_path), cv2.IMREAD_ANYDEPTH))
             xi = np.array(transform, dtype=np.float32).reshape(6, 1)
-            estimated_transforms.append(Se3(So3(xi[3:]), xi[3:]))
+            estimated_transforms.append(Se3.from_se3(xi))
 
         camera_model = RGBDCameraModel.load_from_yaml(Path(data["camera_intrinsics"]).resolve())
 

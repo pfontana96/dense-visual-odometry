@@ -2,7 +2,10 @@ import numpy as np
 # import cupy as cp
 import cv2
 
+from dense_visual_odometry.utils.numpy_cache import np_cache
 
+
+@np_cache
 def compute_jacobian_of_warp_function(
     pointcloud: np.ndarray, calibration_matrix: np.ndarray, use_gpu: bool = False
 ) -> np.ndarray:
