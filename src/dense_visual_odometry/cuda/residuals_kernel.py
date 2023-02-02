@@ -7,7 +7,7 @@ import numpy as np
 
 @cuda.jit('float32(uint8[:,:], int32, int32, int32, int32, boolean)', device=True)
 def compute_gradients(image: DeviceNDArray, x: int, y: int, height: int, width: int, x_direction: bool) -> float:
-    
+
     if x_direction:
         prev_value = image[y, max(x - 1, 0)]
         next_value = image[y, min(x + 1, width - 1)]
@@ -46,9 +46,9 @@ def interpolate_bilinear(image: DeviceNDArray, x: float, y: float, height: int, 
     )
 
     return interpolated_value
-    
 
-@cuda.jit('void(uint8[:,:], uint8[:,:], uint16[:,:], float32[:,:], float32[:], float32, float32, float32, float32, float32, boolean[:,:], float32[:,:], float32[:,:], int32, int32)')
+
+@cuda.jit('void(uint8[:,:], uint8[:,:], uint16[:,:], float32[:,:], float32[:], float32, float32, float32, float32, float32, boolean[:,:], float32[:,:], float32[:,:], int32, int32)')  # noqa
 def residuals_kernel(
     gray_image: DeviceNDArray, gray_image_prev: DeviceNDArray, depth_image_prev: DeviceNDArray, R: DeviceNDArray,
     tvec: DeviceNDArray, fx: float, fy: float, cx: float, cy: float, depth_scale: float, mask: DeviceNDArray,
@@ -95,7 +95,7 @@ def residuals_kernel(
     jacobian[tid, 3] = -fx * gradx * x1 * y1 / (z1 ** 2) - fy * grady * ((y1 ** 2/z1 ** 2) + 1)
     jacobian[tid, 4] = fx * gradx * (x1 ** 2/(z1 ** 2) + 1) + fy * grady * x1 * y1 / (z1 ** 2)
     jacobian[tid, 5] = - fx * gradx * y1 / z1 + fy * grady * x1 / z1
-    
+
     # Deproject to second sensor plane
     warped_x = fx * x1 / z1 + cx
     warped_y = fy * y1 / z1 + cy
@@ -109,7 +109,6 @@ def residuals_kernel(
         mask[ty, tx] = False
 
         return
-    
+
     residuals[ty, tx] = interpolated_intensity - gray_image_prev[ty, tx]
     mask[ty, tx] = True
-    

@@ -307,7 +307,6 @@ class KerlDVO(BaseDenseVisualOdometry):
         err_prev = np.finfo("float32").max
         err_increased_count = 0
 
-        
         height, width = gray_image.shape
 
         residuals_complete = np.zeros(gray_image.shape, dtype=np.float32, order="C")
@@ -355,14 +354,17 @@ class KerlDVO(BaseDenseVisualOdometry):
         gpu_jacobian_buffer = cuda.mapped_array(
             (gray_image.size, 6), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
         )
-        
+
         if self._weighter is not None:
             gpu_weights_buffer = cuda.mapped_array(
                 weights_complete.shape, dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
             )
 
         block_dim = (CUDA_BLOCKSIZE, CUDA_BLOCKSIZE)
-        grid_dim = (int((width + (CUDA_BLOCKSIZE - 1)) // CUDA_BLOCKSIZE), int((height + (CUDA_BLOCKSIZE - 1)) // CUDA_BLOCKSIZE))
+        grid_dim = (
+            int((width + (CUDA_BLOCKSIZE - 1)) // CUDA_BLOCKSIZE),
+            int((height + (CUDA_BLOCKSIZE - 1)) // CUDA_BLOCKSIZE)
+        )
 
         for i in range(self._max_iter):
 
@@ -405,11 +407,12 @@ class KerlDVO(BaseDenseVisualOdometry):
                 weights_complete[...] = gpu_weights_buffer
                 weights = weights_complete[mask].reshape(-1, 1)
 
-                logger.info("Weights (min, max, mean): ({}, {}, {})".format(weights.min(), weights.max(), weights.mean()))
+                logger.info("Weights (min, max, mean): ({}, {}, {})".format(
+                    weights.min(), weights.max(), weights.mean()
+                ))
 
                 residuals = weights * residuals
                 jacobian = weights * jacobian
-
 
             err = np.mean(residuals ** 2)
 

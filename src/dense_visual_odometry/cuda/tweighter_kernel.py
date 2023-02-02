@@ -1,12 +1,13 @@
-import math
-
 from numba import cuda
 from numba.cuda.cudadrv.devicearray import DeviceNDArray
 import numpy as np
 
 
 @cuda.jit("void(float32[:,:], boolean[:,:], float32[:,:], float32, float32, float32, int32, int32, int32, int32)")
-def weighting_kernel(residuals: DeviceNDArray, mask: DeviceNDArray, weights: DeviceNDArray, dof: float, init_sigma: float, tolerance: float, max_iterations: int, N: int, height: int, width: int):
+def weighting_kernel(
+    residuals: DeviceNDArray, mask: DeviceNDArray, weights: DeviceNDArray, dof: float, init_sigma: float,
+    tolerance: float, max_iterations: int, N: int, height: int, width: int
+):
 
     # Estimate scale for the T-Distribution
 
