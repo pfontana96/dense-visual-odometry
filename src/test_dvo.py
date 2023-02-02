@@ -192,6 +192,9 @@ def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path, pyr_down:
 
     camera_model = RGBDCameraModel.load_from_yaml(camera_intrinsics_file)
 
+    if pyr_down:
+        camera_model = RGBDCameraModel(camera_model.at(-1), camera_model.depth_scale)
+
     # Additional data needed for report
     additional_info = {
         "type": "TUM",
@@ -203,7 +206,7 @@ def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path, pyr_down:
     return gt_transforms, rgb_images, depth_images, camera_model, additional_info
 
 
-def _load__test_benchmark(data_path: Path = None, size: int = None):
+def _load__test_benchmark(data_path: Path = None, pyr_down: bool = False, size: int = None):
     """Loads test benchmark (custom dataset format)
 
     Parameters
@@ -249,10 +252,15 @@ def _load__test_benchmark(data_path: Path = None, size: int = None):
                 ))
                 available_gt = False
 
-        rgb_images.append(
-            cv2.cvtColor(cv2.imread(str(data_path / value["rgb"]), cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB)
-        )
-        depth_images.append(cv2.imread(str(data_path / value["depth"]), cv2.IMREAD_ANYDEPTH))
+        rgb_image = cv2.cvtColor(cv2.imread(str(data_path / value["rgb"]), cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB)
+        depth_image = cv2.imread(str(data_path / value["depth"]), cv2.IMREAD_ANYDEPTH)
+
+        if pyr_down:
+            rgb_image = pyrDownMedianSmooth(rgb_image)
+            depth_image = pyrDownMedianSmooth(depth_image)
+
+        rgb_images.append(rgb_image)
+        depth_images.append(depth_image)
 
         additional_info["type"] = "TEST"
         additional_info["rgb"].append(str(data_path / value["rgb"]))
@@ -265,6 +273,9 @@ def _load__test_benchmark(data_path: Path = None, size: int = None):
 
     if not available_gt:
         transformations = [None] * len(rgb_images)
+
+    if pyr_down:
+        camera_model = RGBDCameraModel(camera_model.at(-1), camera_model.depth_scale)
 
     return transformations, rgb_images, depth_images, camera_model, additional_info
 

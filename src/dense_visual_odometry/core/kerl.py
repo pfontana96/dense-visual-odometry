@@ -263,12 +263,14 @@ class KerlDVO(BaseDenseVisualOdometry):
 
         estimate = init_guess.copy()
 
-        for level, (gray_image_l, gray_image_prev_l, depth_image_l, depth_image_prev_l) in enumerate(image_pyramids):
+        for i, (gray_image_l, gray_image_prev_l, depth_image_l, depth_image_prev_l) in enumerate(image_pyramids):
+
+            level = self.levels - 1 - i
 
             if self._use_gpu:
                 estimate = self._non_linear_least_squares_gpu(
                     init_guess=estimate, gray_image=gray_image_l, depth_image=depth_image_l,
-                    gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l, level=level
+                    gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l, level=-level
                 )
 
             else:
@@ -278,7 +280,7 @@ class KerlDVO(BaseDenseVisualOdometry):
 
                 estimate = self._non_linear_least_squares(
                     init_guess=estimate, gray_image=gray_image_l, depth_image=depth_image_l,
-                    gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l, level=level
+                    gray_image_prev=gray_image_prev_l, depth_image_prev=depth_image_prev_l, level=-level
                 )
 
                 self._clear_gray_image_interpolator()
@@ -354,9 +356,10 @@ class KerlDVO(BaseDenseVisualOdometry):
             (gray_image.size, 6), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
         )
         
-        gpu_weights_buffer = cuda.mapped_array(
-            weights_complete.shape, dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
-        )
+        if self._weighter is not None:
+            gpu_weights_buffer = cuda.mapped_array(
+                weights_complete.shape, dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+            )
 
         block_dim = (CUDA_BLOCKSIZE, CUDA_BLOCKSIZE)
         grid_dim = (int((width + (CUDA_BLOCKSIZE - 1)) // CUDA_BLOCKSIZE), int((height + (CUDA_BLOCKSIZE - 1)) // CUDA_BLOCKSIZE))
