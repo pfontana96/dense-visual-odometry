@@ -1,4 +1,5 @@
 import logging
+import ctypes as C
 
 import numpy as np
 from numba import cuda
@@ -309,12 +310,8 @@ class KerlDVO(BaseDenseVisualOdometry):
 
         height, width = gray_image.shape
 
-        residuals_complete = np.zeros(gray_image.shape, dtype=np.float32, order="C")
-        mask = np.zeros(gray_image.shape, dtype=bool, order="C")
-        jacobian_complete = np.zeros((gray_image.size, 6), dtype=np.float32, order="C")
-
         if self._weighter is not None:
-            weights_complete = np.zeros_like(residuals_complete, order="C")
+            weights_complete = np.zeros_like(gray_image, order="C")
 
         gray_image = np.ascontiguousarray(gray_image)
         gray_image_prev = np.ascontiguousarray(gray_image_prev)
@@ -338,21 +335,27 @@ class KerlDVO(BaseDenseVisualOdometry):
 
         # Estimate
         gpu_R_buffer = cuda.mapped_array(
-            (3, 3), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+            (3, 3), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=False
         )
         gpu_tvec_buffer = cuda.mapped_array(
-            (3,), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+            (3,), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=False
         )
 
         # Residuals and jacobian
-        gpu_mask_buffer = cuda.mapped_array(
-            (height, width), dtype=bool, strides=None, order='C', stream=0, portable=False, wc=True
+        gpu_mask_buffer = cuda.managed_array((height, width), dtype=bool, strides=None, order='C', stream=0)
+        gpu_residuals_buffer = cuda.managed_array((height, width), dtype=np.float32, strides=None, order='C', stream=0)
+        gpu_jacobian_buffer = cuda.managed_array(
+            (gray_image.size, 6), dtype=np.float32, strides=None, order='C', stream=0
         )
-        gpu_residuals_buffer = cuda.mapped_array(
-            (height, width), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+
+        residuals_complete = np.ctypeslib.as_array(
+            C.cast(gpu_residuals_buffer.ctypes.data, C.POINTER(C.c_float)), shape=gpu_residuals_buffer.shape
         )
-        gpu_jacobian_buffer = cuda.mapped_array(
-            (gray_image.size, 6), dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
+        mask = np.ctypeslib.as_array(
+            C.cast(gpu_mask_buffer.ctypes.data, C.POINTER(C.c_bool)), shape=gpu_mask_buffer.shape
+        )
+        jacobian_complete = np.ctypeslib.as_array(
+            C.cast(gpu_jacobian_buffer.ctypes.data, C.POINTER(C.c_float)), shape=gpu_jacobian_buffer.shape
         )
 
         if self._weighter is not None:
@@ -385,10 +388,6 @@ class KerlDVO(BaseDenseVisualOdometry):
             )
 
             cuda.synchronize()
-
-            residuals_complete[...] = gpu_residuals_buffer
-            jacobian_complete[...] = gpu_jacobian_buffer
-            mask[...] = gpu_mask_buffer
 
             residuals = residuals_complete[mask].reshape(-1, 1)
             jacobian = jacobian_complete[mask.reshape(-1)]
