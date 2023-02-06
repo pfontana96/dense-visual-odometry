@@ -20,14 +20,16 @@ jobs:
     needs:
       - Quality
     runs-on: ubuntu-20.04
+    env:
+      NUMBA_ENABLE_CUDASIM: 1
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-python@v2
         with:
           python-version: "3.7.5"
-      - uses: Jimver/cuda-toolkit@v0.2.8
-        id: cuda-toolkit
-        with:
-          cuda: '11.7.0'
+      # - uses: Jimver/cuda-toolkit@v0.2.8
+      #   id: cuda-toolkit
+      #   with:
+      #     cuda: '11.7.0'
       - run: pip install tox
       - run: tox -e test

@@ -1,12 +1,12 @@
 import math
 
 from numba import cuda
-from numba.cuda.cudadrv.devicearray import DeviceNDArray
 import numpy as np
+import numpy.typing as npt
 
 
 @cuda.jit('float32(uint8[:,:], int32, int32, int32, int32, boolean)', device=True)
-def compute_gradients(image: DeviceNDArray, x: int, y: int, height: int, width: int, x_direction: bool) -> float:
+def compute_gradients(image: npt.ArrayLike, x: int, y: int, height: int, width: int, x_direction: bool) -> float:
 
     if x_direction:
         prev_value = image[y, max(x - 1, 0)]
@@ -20,7 +20,7 @@ def compute_gradients(image: DeviceNDArray, x: int, y: int, height: int, width: 
 
 
 @cuda.jit('float32(uint8[:,:], float32, float32, int32, int32)', device=True)
-def interpolate_bilinear(image: DeviceNDArray, x: float, y: float, height: int, width: int) -> float:
+def interpolate_bilinear(image: npt.ArrayLike, x: float, y: float, height: int, width: int) -> float:
     x0 = int(x // 1)
     y0 = int(y // 1)
     x1 = x0 + 1
@@ -50,9 +50,9 @@ def interpolate_bilinear(image: DeviceNDArray, x: float, y: float, height: int, 
 
 @cuda.jit('void(uint8[:,:], uint8[:,:], uint16[:,:], float32[:,:], float32[:], float32, float32, float32, float32, float32, boolean[:,:], float32[:,:], float32[:,:], int32, int32)')  # noqa
 def residuals_kernel(
-    gray_image: DeviceNDArray, gray_image_prev: DeviceNDArray, depth_image_prev: DeviceNDArray, R: DeviceNDArray,
-    tvec: DeviceNDArray, fx: float, fy: float, cx: float, cy: float, depth_scale: float, mask: DeviceNDArray,
-    residuals: DeviceNDArray, jacobian: DeviceNDArray, height: int, width: int
+    gray_image: npt.ArrayLike, gray_image_prev: npt.ArrayLike, depth_image_prev: npt.ArrayLike, R: npt.ArrayLike,
+    tvec: npt.ArrayLike, fx: float, fy: float, cx: float, cy: float, depth_scale: float, mask: npt.ArrayLike,
+    residuals: npt.ArrayLike, jacobian: npt.ArrayLike, height: int, width: int
 ):
     tx, ty = cuda.grid(2)
 
