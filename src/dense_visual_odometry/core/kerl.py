@@ -12,7 +12,7 @@ from dense_visual_odometry.utils.jacobian import compute_jacobian_of_warp_functi
 from dense_visual_odometry.utils.numpy_cache import np_cache
 from dense_visual_odometry.camera_model import RGBDCameraModel
 from dense_visual_odometry.weighter.t_weighter import TDistributionWeighter
-from dense_visual_odometry.cuda import CUDA_BLOCKSIZE, residuals_kernel, weighting_kernel
+from dense_visual_odometry.cuda import CUDA_BLOCKSIZE, residuals_kernel
 
 
 logger = logging.getLogger(__name__)
@@ -310,9 +310,6 @@ class KerlDVO(BaseDenseVisualOdometry):
 
         height, width = gray_image.shape
 
-        if self._weighter is not None:
-            weights_complete = np.zeros_like(gray_image, order="C")
-
         gray_image = np.ascontiguousarray(gray_image)
         gray_image_prev = np.ascontiguousarray(gray_image_prev)
         depth_image_prev = np.ascontiguousarray(depth_image_prev)
@@ -358,11 +355,6 @@ class KerlDVO(BaseDenseVisualOdometry):
             C.cast(gpu_jacobian_buffer.ctypes.data, C.POINTER(C.c_float)), shape=gpu_jacobian_buffer.shape
         )
 
-        if self._weighter is not None:
-            gpu_weights_buffer = cuda.mapped_array(
-                weights_complete.shape, dtype=np.float32, strides=None, order='C', stream=0, portable=False, wc=True
-            )
-
         block_dim = (CUDA_BLOCKSIZE, CUDA_BLOCKSIZE)
         grid_dim = (
             int((width + (CUDA_BLOCKSIZE - 1)) // CUDA_BLOCKSIZE),
@@ -397,23 +389,18 @@ class KerlDVO(BaseDenseVisualOdometry):
             # Computes weights if required
             if self._weighter is not None:
 
-                weighting_kernel[grid_dim, block_dim](
-                    gpu_residuals_buffer, gpu_mask_buffer, gpu_weights_buffer, 5.0, 5.0, 1e-3, 100, height, width
-                )
+                residuals_squared = residuals * residuals
 
-                cuda.synchronize()
+                weights = self._weighter.weight(residuals_squared=residuals_squared)
 
-                weights_complete[...] = gpu_weights_buffer
-                weights = weights_complete[mask].reshape(-1, 1)
-
-                logger.info("Weights (min, max, mean): ({}, {}, {})".format(
-                    weights.min(), weights.max(), weights.mean()
-                ))
+                err = np.mean(weights * residuals_squared)
 
                 residuals = weights * residuals
                 jacobian = weights * jacobian
 
-            err = np.mean(residuals ** 2)
+            else:
+
+                err = np.mean(residuals ** 2)
 
             # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
             H = np.dot(jacobian_t, jacobian)
@@ -429,7 +416,7 @@ class KerlDVO(BaseDenseVisualOdometry):
             if self._mu is not None:
                 err += 0.5 * self._mu * np.linalg.norm(initial.log())
 
-            inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b)
+            inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
 
             inc = Se3.from_se3(inc_xi)
 
@@ -518,7 +505,7 @@ class KerlDVO(BaseDenseVisualOdometry):
             if self._mu is not None:
                 err += 0.5 * self._mu * np.linalg.norm(initial.log())
 
-            inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b)
+            inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
 
             inc = Se3.from_se3(inc_xi)
 
