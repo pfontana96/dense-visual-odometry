@@ -5,7 +5,7 @@ llvmlite~=0.39.1
 cython~=0.29.33
 scipy~=1.7.3
 numba~=0.56.4
-opencv-python~=4.6.0
+# opencv-python~=4.6.0 ## Not here on Jetson Nano branch
 pyyaml==6.0.*
 # cupy~=9.6.*
 # torch==1.10.*
