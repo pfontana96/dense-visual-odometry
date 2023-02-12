@@ -2,6 +2,7 @@ import logging
 import ctypes as C
 
 import numpy as np
+import numba as nb
 from numba import cuda
 from scipy.interpolate import RegularGridInterpolator
 
@@ -16,6 +17,12 @@ from dense_visual_odometry.cuda import CUDA_BLOCKSIZE, residuals_kernel
 
 
 logger = logging.getLogger(__name__)
+
+
+@nb.njit("float32[:,:](float32[:,:], float32[:,:])", fastmath=True)
+def nb_lstsq(a, b):
+    result, _, _, _ = np.linalg.lstsq(a=a, b=b)
+    return result
 
 
 class KerlDVO(BaseDenseVisualOdometry):
@@ -403,8 +410,8 @@ class KerlDVO(BaseDenseVisualOdometry):
                 err = np.mean(residuals ** 2)
 
             # Solve linear system: (Jt * W * J) * delta_xi = (-Jt * W * r) -> H * delta_xi = b
-            H = np.dot(jacobian_t, jacobian)
-            b = - np.dot(jacobian_t, residuals)
+            H = jacobian_t @ jacobian
+            b = - jacobian_t @ residuals
 
             if self._sigma is not None:
                 # maybe_old = SE3.log(np.dot(SE3.inverse(SE3.exp(estimate)), SE3.exp(self._current_pose)))
@@ -416,7 +423,8 @@ class KerlDVO(BaseDenseVisualOdometry):
             if self._mu is not None:
                 err += 0.5 * self._mu * np.linalg.norm(initial.log())
 
-            inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
+            # inc_xi, _, _, _ = lstsq(a=H, b=b, lapack_driver="gelsy", overwrite_a=True, overwrite_b=True, check_finite=False)
+            inc_xi = nb_lstsq(a=H, b=b)
 
             inc = Se3.from_se3(inc_xi)
 
