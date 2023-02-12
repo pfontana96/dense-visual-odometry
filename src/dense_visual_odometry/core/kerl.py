@@ -50,7 +50,7 @@ class KerlDVO(BaseDenseVisualOdometry):
     def __init__(
         self, camera_model: RGBDCameraModel, initial_pose: Se3, levels: int, use_weighter: bool = False,
         max_increased_steps_allowed: int = 0, sigma: float = None, use_gpu: bool = False, tolerance: float = 1e-6,
-        max_iterations: int = 100, mu: float = None, approximate_image2_gradient: bool = False
+        max_iterations: int = 100, approximate_image2_gradient: bool = False
     ):
         """
         Parameters
@@ -72,8 +72,6 @@ class KerlDVO(BaseDenseVisualOdometry):
         self._sigma = sigma
         if self._sigma is not None:
             self._inv_cov = (1 / self._sigma) * np.eye(6, dtype=np.float32)
-
-        self._mu = mu
 
         self._use_gpu = use_gpu
 
@@ -308,7 +306,7 @@ class KerlDVO(BaseDenseVisualOdometry):
         depth_image_prev: np.ndarray, level: int = 0
     ):
 
-        old = self._current_pose.copy()
+        old = self._last_estimated_transform.copy()
         estimate = init_guess.copy()
         initial = init_guess.copy()
 
@@ -413,15 +411,11 @@ class KerlDVO(BaseDenseVisualOdometry):
             H = jacobian_t @ jacobian
             b = - jacobian_t @ residuals
 
-            if self._sigma is not None:
-                # maybe_old = SE3.log(np.dot(SE3.inverse(SE3.exp(estimate)), SE3.exp(self._current_pose)))
+            if (self._sigma is not None) and (old is not None):
                 H += self._inv_cov
-                b += np.dot(self._inv_cov, old.log())
+                b += self._inv_cov @ old.log()
 
                 err += 0.5 * self._sigma * np.linalg.norm(old.log())
-
-            if self._mu is not None:
-                err += 0.5 * self._mu * np.linalg.norm(initial.log())
 
             # inc_xi, _, _, _ = lstsq(
             #     a=H, b=b, lapack_driver="gelsy", overwrite_a=True, overwrite_b=True, check_finite=False
@@ -444,11 +438,8 @@ class KerlDVO(BaseDenseVisualOdometry):
                 estimate = inc * estimate
                 err_prev = err
 
-                if self._sigma is not None:
+                if (self._sigma is not None) and (old is not None):
                     old = inc.inverse() * old
-
-                if self._mu is not None:
-                    initial = inc.inverse() * initial
 
                 err_increased_count = 0
 
@@ -512,9 +503,6 @@ class KerlDVO(BaseDenseVisualOdometry):
 
                 err += 0.5 * self._sigma * np.linalg.norm(old.log())
 
-            if self._mu is not None:
-                err += 0.5 * self._mu * np.linalg.norm(initial.log())
-
             inc_xi, _, _, _ = np.linalg.lstsq(a=H, b=b, rcond=None)
 
             inc = Se3.from_se3(inc_xi)
@@ -535,9 +523,6 @@ class KerlDVO(BaseDenseVisualOdometry):
 
                 if self._sigma is not None:
                     old = inc.inverse() * old
-
-                if self._mu is not None:
-                    initial = inc.inverse() * initial
 
                 err_increased_count = 0
 
