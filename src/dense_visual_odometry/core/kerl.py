@@ -423,7 +423,9 @@ class KerlDVO(BaseDenseVisualOdometry):
             if self._mu is not None:
                 err += 0.5 * self._mu * np.linalg.norm(initial.log())
 
-            # inc_xi, _, _, _ = lstsq(a=H, b=b, lapack_driver="gelsy", overwrite_a=True, overwrite_b=True, check_finite=False)
+            # inc_xi, _, _, _ = lstsq(
+            #     a=H, b=b, lapack_driver="gelsy", overwrite_a=True, overwrite_b=True, check_finite=False
+            # )
             inc_xi = nb_lstsq(a=H, b=b)
 
             inc = Se3.from_se3(inc_xi)
