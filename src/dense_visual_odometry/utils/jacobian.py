@@ -1,14 +1,13 @@
 import numpy as np
-# import cupy as cp
+import numpy.typing as npt
+import numba as nb
 import cv2
 
-from dense_visual_odometry.utils.numpy_cache import np_cache
 
-
-@np_cache
+@nb.njit("float32[:,:,:](float32[:,:], float32[:,:])", parallel=True, fastmath=True)
 def compute_jacobian_of_warp_function(
-    pointcloud: np.ndarray, calibration_matrix: np.ndarray, use_gpu: bool = False
-) -> np.ndarray:
+    pointcloud: npt.NDArray[np.float32], calibration_matrix: npt.NDArray[np.float32]
+) -> npt.NDArray[np.float32]:
     """
         Computes the Jacobian of a warp function
 
@@ -28,19 +27,19 @@ def compute_jacobian_of_warp_function(
     fx = calibration_matrix[0, 0]
     fy = calibration_matrix[1, 1]
 
-    x = pointcloud[0, :]
-    y = pointcloud[1, :]
-    z = pointcloud[2, :]
+    N = pointcloud.shape[1]
 
-    zeros = np.zeros_like(x)
+    J_w = np.empty((N, 2, 6), dtype=np.float32)
 
-    J_w = np.array([
-        [fx / z, zeros, -fx * x / z ** 2, -fx * (x * y) / z ** 2, fx * (1 + (x ** 2 / z ** 2)), -fx * y / z],
-        [zeros, fy / z, -fy * y / z ** 2, -fy * (1 + (y ** 2 / z ** 2)), fy * (x * y) / z ** 2, fy * x / z]
-    ], dtype=np.float32)
+    for i in nb.prange(N):
+        x = pointcloud[0, i]
+        y = pointcloud[1, i]
+        z = pointcloud[2, i]
 
-    # Transpose array to be of shape Nx2x6
-    J_w = np.transpose(J_w, [2, 0, 1])
+        J_w[i] = np.array([
+            [fx / z, 0.0, -fx * x / z ** 2, -fx * (x * y) / z ** 2, fx * (1 + (x ** 2 / z ** 2)), -fx * y / z],
+            [0.0, fy / z, -fy * y / z ** 2, -fy * (1 + (y ** 2 / z ** 2)), fy * (x * y) / z ** 2, fy * x / z]
+        ], dtype=np.float32)
 
     return J_w
 

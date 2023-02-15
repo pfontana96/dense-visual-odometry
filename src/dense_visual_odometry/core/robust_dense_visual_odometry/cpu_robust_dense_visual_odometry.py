@@ -3,6 +3,7 @@ import logging
 
 import numpy as np
 import numpy.typing as npt
+import numba as nb
 from scipy.interpolate import RegularGridInterpolator
 
 from dense_visual_odometry.core.robust_dense_visual_odometry.base_robust_dvo import BaseRobustDVO
@@ -87,12 +88,33 @@ class RobustDVOCPU(BaseRobustDVO):
 
             gradx, grady = compute_gradients(image=self._prev_gray_image_pyr.at(level), kernel_size=3)
 
+            # gradx_values = gradx[mask].reshape(-1, 1)
+            # grady_values = grady[mask].reshape(-1, 1)
+
+            # self._jacobian = np.empty((gradx_values.size, 6), dtype=np.float32)
+            # for i, gradients in enumerate(np.hstack((gradx_values, grady_values))):
+            #     self._jacobian[i] = np.dot(gradients.reshape(1, 2), J_w[i])
             gradx_values = gradx[mask].reshape(-1, 1)
             grady_values = grady[mask].reshape(-1, 1)
 
-            J = np.empty((gradx_values.size, 6), dtype=np.float32)
-            for i, gradients in enumerate(np.hstack((gradx_values, grady_values))):
-                J[i] = np.dot(gradients.reshape(1, 2), J_w[i])
+            gradients = np.ascontiguousarray(np.hstack((gradx_values, grady_values)))
+
+            self._jacobian = self._compute_jacobian_approximate_image2_gradient(
+                np.ascontiguousarray(J_w), gradients
+            )
+
+    @staticmethod
+    @nb.njit("float32[:,:](float32[:,:,:], float32[:,:])", parallel=True, fastmath=True)
+    def _compute_jacobian_approximate_image2_gradient(
+        Jw: npt.NDArray[np.float32], gradients: npt.NDArray[np.uint8]
+    ) -> npt.NDArray[np.float32]:
+
+        N = gradients.shape[0]
+        jacobian = np.empty((N, 6), dtype=np.float32)
+        for i in nb.prange(N):
+            jacobian[i] = gradients[i] @ Jw[i]
+
+        return jacobian
 
     def _cleanup(self):
         self._gray_image_interpolator = None
