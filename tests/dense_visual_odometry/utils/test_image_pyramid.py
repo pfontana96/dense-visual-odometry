@@ -1,6 +1,4 @@
 import numpy as np
-import logging
-import pytest
 
 from dense_visual_odometry.utils.image_pyramid import ImagePyramid, ImagePyramidError
 
