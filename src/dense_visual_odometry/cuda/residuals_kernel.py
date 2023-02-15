@@ -30,19 +30,14 @@ def interpolate_bilinear(image: npt.ArrayLike, x: float, y: float, height: int, 
     if (x0 < 0) or (y0 < 0) or (x1 >= width) or (y1 >= height):
         return np.nan
 
-    x0_weight = x - x0
-    x1_weight = x1 - x
-    y0_weight = y - y0
-    y1_weight = y1 - y
-
-    w00 = x0_weight * y0_weight
-    w01 = x0_weight * y1_weight
-    w10 = x1_weight * y0_weight
-    w11 = x1_weight * y1_weight
+    w00 = (x1 - x) * (y1 - y)
+    w01 = (x1 - x) * (y - y0)
+    w10 = (x - x0) * (y1 - y)
+    w11 = (x - x0) * (y - y0)
 
     interpolated_value = (
         (w00 * image[y0, x0] + w01 * image[y1, x0] + w10 * image[y0, x1] + w11 * image[y1, x1]) /
-        (w00 + w01 + w10 + w11)
+        ((x1 - x0) * (y1 - y0))
     )
 
     return interpolated_value
