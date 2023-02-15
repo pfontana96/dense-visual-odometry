@@ -299,12 +299,13 @@ def main():
 
     dvo, gt_transforms, rgb_images, depth_images, additional_info = parse_arguments()
 
-    steps = []
+    transforms = []
+    poses = []
     errors = []
     for i, (rgb_image, depth_image, gt_transform) in enumerate(zip(rgb_images, depth_images, gt_transforms)):
 
         s = time()
-        dvo.step(rgb_image, depth_image)
+        transform = dvo.step(rgb_image, depth_image)
         e = time()
 
         # Error is only the euclidean distance (not taking rotation into account)
@@ -319,11 +320,12 @@ def main():
             r_error = "N/A"
             logger.info("[Frame {} ({:.3f} s)]".format(i + 1, e - s))
 
-        steps.append(dvo.current_pose.log().flatten().tolist())
+        poses.append(dvo.current_pose.log().flatten().tolist())
+        transforms.append(transform.log().flatten().tolist())
         errors.append(t_error)
 
     # Dump results
-    report = {"estimated_transformations": steps, "errors": errors}
+    report = {"estimated_poses": poses, "errors": errors, "estimated_transforms": transforms}
     report.update(additional_info)
 
     output_file = Path(__file__).resolve().parent.parent / "data" / "report.json"
@@ -336,7 +338,7 @@ def main():
         with output_file.with_suffix(".txt").open("w") as fp:
             fp.write("# timestamp tx ty tz qx qy qz qw\n")
 
-            for ts, transform in zip(additional_info["timestamps"], steps):
+            for ts, transform in zip(additional_info["timestamps"], poses):
                 pose = Se3.from_se3(np.array(transform, dtype=np.float32).reshape(6, 1))
                 pose_txt = [str(ts)] + pose.tvec.flatten().tolist() + np.roll(pose.so3.quat, -1).flatten().tolist()
                 fp.write(" ".join((str(el) for el in pose_txt)))

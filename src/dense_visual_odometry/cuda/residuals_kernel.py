@@ -1,12 +1,12 @@
 import math
 
 from numba import cuda
-from numba.cuda.cudadrv.devicearray import DeviceNDArray
 import numpy as np
+import numpy.typing as npt
 
 
 @cuda.jit('float32(uint8[:,:], int32, int32, int32, int32, boolean)', device=True)
-def compute_gradients(image: DeviceNDArray, x: int, y: int, height: int, width: int, x_direction: bool) -> float:
+def compute_gradients(image: npt.ArrayLike, x: int, y: int, height: int, width: int, x_direction: bool) -> float:
 
     if x_direction:
         prev_value = image[y, max(x - 1, 0)]
@@ -20,7 +20,7 @@ def compute_gradients(image: DeviceNDArray, x: int, y: int, height: int, width: 
 
 
 @cuda.jit('float32(uint8[:,:], float32, float32, int32, int32)', device=True)
-def interpolate_bilinear(image: DeviceNDArray, x: float, y: float, height: int, width: int) -> float:
+def interpolate_bilinear(image: npt.ArrayLike, x: float, y: float, height: int, width: int) -> float:
     x0 = int(x // 1)
     y0 = int(y // 1)
     x1 = x0 + 1
@@ -30,19 +30,14 @@ def interpolate_bilinear(image: DeviceNDArray, x: float, y: float, height: int, 
     if (x0 < 0) or (y0 < 0) or (x1 >= width) or (y1 >= height):
         return np.nan
 
-    x0_weight = x - x0
-    x1_weight = x1 - x
-    y0_weight = y - y0
-    y1_weight = y1 - y
-
-    w00 = x0_weight * y0_weight
-    w01 = x0_weight * y1_weight
-    w10 = x1_weight * y0_weight
-    w11 = x1_weight * y1_weight
+    w00 = (x1 - x) * (y1 - y)
+    w01 = (x1 - x) * (y - y0)
+    w10 = (x - x0) * (y1 - y)
+    w11 = (x - x0) * (y - y0)
 
     interpolated_value = (
         (w00 * image[y0, x0] + w01 * image[y1, x0] + w10 * image[y0, x1] + w11 * image[y1, x1]) /
-        (w00 + w01 + w10 + w11)
+        ((x1 - x0) * (y1 - y0))
     )
 
     return interpolated_value
@@ -50,9 +45,9 @@ def interpolate_bilinear(image: DeviceNDArray, x: float, y: float, height: int, 
 
 @cuda.jit('void(uint8[:,:], uint8[:,:], uint16[:,:], float32[:,:], float32[:], float32, float32, float32, float32, float32, boolean[:,:], float32[:,:], float32[:,:], int32, int32)')  # noqa
 def residuals_kernel(
-    gray_image: DeviceNDArray, gray_image_prev: DeviceNDArray, depth_image_prev: DeviceNDArray, R: DeviceNDArray,
-    tvec: DeviceNDArray, fx: float, fy: float, cx: float, cy: float, depth_scale: float, mask: DeviceNDArray,
-    residuals: DeviceNDArray, jacobian: DeviceNDArray, height: int, width: int
+    gray_image: npt.ArrayLike, gray_image_prev: npt.ArrayLike, depth_image_prev: npt.ArrayLike, R: npt.ArrayLike,
+    tvec: npt.ArrayLike, fx: float, fy: float, cx: float, cy: float, depth_scale: float, mask: npt.ArrayLike,
+    residuals: npt.ArrayLike, jacobian: npt.ArrayLike, height: int, width: int
 ):
     tx, ty = cuda.grid(2)
 

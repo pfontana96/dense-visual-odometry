@@ -60,9 +60,12 @@ class RGBDCameraModel:
         self.distorsion_model = distorssion_model
 
     def at(self, level: int):
+        assert level >= 0, "Expected 'level' to be >= 0, got '{}' instead".format(level)
 
         if level == 0:
             return self._intrinsics
+
+        level = -level  # Needed
 
         scale_matrix = np.array([
             [2 ** level, 0, 2 ** (level - 1) - 0.5],
