@@ -72,9 +72,9 @@ class RobustDVOCPU(BaseRobustDVO):
             gradx_values = gradx[mask].reshape(-1, 1)
             grady_values = grady[mask].reshape(-1, 1)
 
-            gradients = np.ascontiguousarray(np.hstack((gradx_values, grady_values)))
+            gradients = np.hstack((gradx_values, grady_values))
 
-            self._jacobian = self._fill_jacobian(np.ascontiguousarray(J_w), gradients)
+            self._jacobian = self._fill_jacobian(J_w, gradients)
 
     @staticmethod
     @nb.njit("float32[:,:](float32[:,:,:], float32[:,:])", parallel=True, fastmath=True)
@@ -85,7 +85,7 @@ class RobustDVOCPU(BaseRobustDVO):
         N = gradients.shape[0]
         jacobian = np.empty((N, 6), dtype=np.float32)
         for i in nb.prange(N):
-            jacobian[i] = gradients[i] @ Jw[i]
+            jacobian[i] = np.dot(gradients[i], Jw[i])
 
         return jacobian
 
