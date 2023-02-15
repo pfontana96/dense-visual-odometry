@@ -35,7 +35,7 @@ class TestComputeJacobianOfWarpFunction(TestCase):
             [[1 / 6, 0, -(1 / 9), -(5 / 9), 13 / 9, -(5 / 6)],
              [0, 1 / 6, -(5 / 36), -(61 / 36), 5 / 9, 2 / 3]]
         ], dtype=np.float32)
-        np.testing.assert_array_equal(result, expected_result)
+        np.testing.assert_allclose(result, expected_result, atol=1e-5)
 
 
 class TestComputeGradients(TestCase):

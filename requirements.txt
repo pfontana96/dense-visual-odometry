@@ -1,8 +1,12 @@
 # --extra-index-url https://download.pytorch.org/whl/cu116
-numpy==1.23.*
-opencv-python==4.6.*
+tqdm
+numpy~=1.21.6
+llvmlite~=0.39.1
+cython~=0.29.33
+scipy~=1.7.3
+numba~=0.56.4
+opencv-python~=4.6.0
 pyyaml==6.0.*
-open3d
-numba~=0.56.3
-# torch==1.12.1
-# kornia==0.6.7
+# cupy~=9.6.*
+# torch==1.10.*
+# kornia==0.6.7  # Should modify LoFTR code to use more recent versions

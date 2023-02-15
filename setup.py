@@ -1,5 +1,4 @@
-from setuptools import setup
-from setuptools import find_namespace_packages
+from setuptools import setup, find_packages
 from pathlib import Path
 
 
@@ -25,19 +24,17 @@ setup(
     long_description=read("README.md"),
     url="https://github.com/pfontana96/dense-visual-odometry",
     package_dir={"": "src"},
-    packages=find_namespace_packages("src"),
+    packages=find_packages("src"),
     include_package_data=True,
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
         "Programming Language :: Python",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: Implementation :: CPython",
         "Topic :: Software Development :: Libraries"
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.7",
     install_requires=read("requirements.txt").splitlines(),
     zip_safe=False
 )

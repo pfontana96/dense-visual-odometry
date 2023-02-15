@@ -13,17 +13,26 @@ class BaseSpecialGroup(abc.ABC):
         Interface for Special Groups in Lie's Algebra
     """
 
-    @staticmethod
     @abc.abstractmethod
     def hat(vector):
-        raise NotImplementedError
+        pass
 
-    @staticmethod
     @abc.abstractmethod
     def exp(vector):
-        raise NotImplementedError
+        pass
 
-    @staticmethod
     @abc.abstractmethod
     def log(self):
-        raise NotImplementedError
+        pass
+
+    @abc.abstractmethod
+    def inverse(self):
+        pass
+
+    @abc.abstractmethod
+    def __mul__(self, right):
+        pass
+
+    @abc.abstractmethod
+    def __eq__(self, right):
+        pass

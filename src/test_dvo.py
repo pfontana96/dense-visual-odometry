@@ -3,17 +3,18 @@ import json
 import logging
 from time import time
 from argparse import ArgumentParser
+from typing import Union
 
 import numpy as np
 import cv2
-from scipy.spatial.transform import Rotation as rot
 from scipy.spatial.distance import cdist
 from tqdm import tqdm
 
-from dense_visual_odometry.core import KerlDVO
+from dense_visual_odometry.core import get_dvo
 from dense_visual_odometry.camera_model import RGBDCameraModel
 from dense_visual_odometry.log import set_root_logger
-from dense_visual_odometry.utils.lie_algebra import SE3
+from dense_visual_odometry.utils.lie_algebra import Se3, So3
+from dense_visual_odometry.utils.image_pyramid import pyrDownMedianSmooth
 
 
 logger = logging.getLogger(__name__)
@@ -32,15 +33,30 @@ def parse_arguments():
         "-s", "--size", type=int, default=None,
         help="Number of data samples to use (first 'size' samples are selected)"
     )
+    parser.add_argument("-m", "--method", type=str, default="kerl", help="Dense visual odometry method to use")
+    parser.add_argument("-c", "--config-file", type=str, help="Dense visual odometry method's configuraion JSON")
+    parser.add_argument("-p", "--pyr-down", action="store_true", help="If to downsample dataset image size")
 
     args = parser.parse_args()
 
     set_root_logger(verbose=args.verbose)
 
-    return load_benchmark(type=args.benchmark, data_dir=args.data_dir, size=args.size)
+    gt_transforms, rgb_images, depth_images, camera_model, additional_info = load_benchmark(
+        type=args.benchmark, data_dir=args.data_dir, size=args.size
+    )
+
+    init_pose = gt_transforms[0] if gt_transforms[0] is not None else Se3.identity()
+
+    config = {}
+    if args.config_file is not None:
+        config = _load_config(args.config_file)
+
+    dvo = get_dvo(args.method, camera_model=camera_model, init_pose=init_pose, **config)
+
+    return dvo, gt_transforms, rgb_images, depth_images, additional_info
 
 
-def load_benchmark(type: str, data_dir: str = None, size: int = None):
+def load_benchmark(type: str, data_dir: str = None, size: int = None, pyr_down: bool = False):
     if type == "tum-fr1":
         if data_dir is None:
             raise ValueError("When running 'tum-fr1' path to data (-d) should be specified")
@@ -53,7 +69,7 @@ def load_benchmark(type: str, data_dir: str = None, size: int = None):
         camera_intrinsics_file = Path(__file__).resolve().parent.parent / "tests/test_data/camera_intrinsics.yaml"
 
         gt_transforms, rgb_images, depth_images, camera_model, additional_info = _load_tum_benchmark(
-            data_path=data_dir, camera_intrinsics_file=camera_intrinsics_file
+            data_path=data_dir, camera_intrinsics_file=camera_intrinsics_file, pyr_down=pyr_down, size=size
         )
 
     elif type == "test":
@@ -61,19 +77,13 @@ def load_benchmark(type: str, data_dir: str = None, size: int = None):
             data_dir = Path(data_dir).resolve()
 
         gt_transforms, rgb_images, depth_images, camera_model, additional_info = _load__test_benchmark(
-            data_path=data_dir
+            data_path=data_dir, size=size
         )
-
-    if (size is not None) and (size <= len(rgb_images)):
-        logger.info("Using first '{}' data samples".format(size))
-        gt_transforms = gt_transforms[0:size]
-        rgb_images = rgb_images[0:size]
-        depth_images = depth_images[0:size]
 
     return gt_transforms, rgb_images, depth_images, camera_model, additional_info
 
 
-def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path):
+def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path, pyr_down: bool = False, size: int = None):
     """Loads TUM RGB-D benchmarks. See https://vision.in.tum.de/data/datasets/rgbd-dataset/file_formats
 
     Parameters
@@ -125,11 +135,11 @@ def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path):
 
             # If groundtruth then save se(3) pose
             if filename == "groundtruth.txt":
-                # Ground truth is given as tx, ty, tz, qx, qy, qz, qw
-                T = np.eye(4, dtype=np.float32)
-                T[:3, 3] = np.asarray(line_stripped[1:4])
-                T[:3, :3] = rot.from_quat(np.asarray(line_stripped[4:])).as_matrix()
-                data.append(SE3.log(T))
+                pose = Se3(
+                    So3(np.roll(np.asarray(line_stripped[4:], dtype=np.float32), 1).reshape(4, 1)),
+                    np.asarray(line_stripped[1:4], dtype=np.float32).reshape(3, 1)
+                )
+                data.append(pose)
 
             else:
                 image_path = data_path / line_stripped[1]
@@ -160,24 +170,43 @@ def _load_tum_benchmark(data_path: Path, camera_intrinsics_file: Path):
     logger.info("DONE")
 
     gt_transforms = list(filedata["groundtruth"]["data"][closests_groundtruth])
+    gt_timestamps = list(filedata["groundtruth"]["timestamp"][closests_groundtruth])
+
+    if (size is not None) and (size < len(rgb_images_paths)):
+        gt_transforms = gt_transforms[:size]
+        rgb_images_paths = rgb_images_paths[:size]
+        depth_images_paths = depth_images_paths[:size]
+
     rgb_images = []
     depth_images = []
     for rgb_path, depth_path in tqdm(zip(rgb_images_paths, depth_images_paths), ascii=True, desc="Loading images"):
-        rgb_images.append(cv2.cvtColor(cv2.imread(rgb_path, cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB))
-        depth_images.append(cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH))
+        rgb_image = cv2.cvtColor(cv2.imread(rgb_path, cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB)
+        depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+
+        if pyr_down:
+            rgb_image = pyrDownMedianSmooth(image=rgb_image)
+            depth_image = pyrDownMedianSmooth(image=depth_image)
+
+        rgb_images.append(rgb_image)
+        depth_images.append(depth_image)
 
     camera_model = RGBDCameraModel.load_from_yaml(camera_intrinsics_file)
 
+    if pyr_down:
+        camera_model = RGBDCameraModel(camera_model.at(-1), camera_model.depth_scale)
+
     # Additional data needed for report
     additional_info = {
+        "type": "TUM",
         "rgb": rgb_images_paths.tolist(), "depth": depth_images_paths.tolist(),
-        "camera_intrinsics": str(camera_intrinsics_file)
+        "camera_intrinsics": str(camera_intrinsics_file),
+        "timestamps": gt_timestamps
     }
 
     return gt_transforms, rgb_images, depth_images, camera_model, additional_info
 
 
-def _load__test_benchmark(data_path: Path = None):
+def _load__test_benchmark(data_path: Path = None, pyr_down: bool = False, size: int = None):
     """Loads test benchmark (custom dataset format)
 
     Parameters
@@ -212,63 +241,108 @@ def _load__test_benchmark(data_path: Path = None):
     rgb_images = []
     depth_images = []
     additional_info = {"rgb": [], "depth": [], "camera_intrinsics": str(data_path / "camera_intrinsics.yaml")}
-    for value in data.values():
+    for i, value in enumerate(data.values()):
         if available_gt:
             try:
-                transformations.append(SE3.log(np.array(value["transformation"])))
+                xi = np.array(value["transformation"]).reshape(6, 1)
+                transformations.append(Se3(So3(xi[3:]), xi[:3]))
             except KeyError as e:
                 logger.info("Could not find ground truth transform under '{}' at '{}'".format(
                     e, str(data_path)
                 ))
                 available_gt = False
 
-        rgb_images.append(
-            cv2.cvtColor(cv2.imread(str(data_path / value["rgb"]), cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB)
-        )
-        depth_images.append(cv2.imread(str(data_path / value["depth"]), cv2.IMREAD_ANYDEPTH))
+        rgb_image = cv2.cvtColor(cv2.imread(str(data_path / value["rgb"]), cv2.IMREAD_ANYCOLOR), cv2.COLOR_BGR2RGB)
+        depth_image = cv2.imread(str(data_path / value["depth"]), cv2.IMREAD_ANYDEPTH)
 
+        if pyr_down:
+            rgb_image = pyrDownMedianSmooth(rgb_image)
+            depth_image = pyrDownMedianSmooth(depth_image)
+
+        rgb_images.append(rgb_image)
+        depth_images.append(depth_image)
+
+        additional_info["type"] = "TEST"
         additional_info["rgb"].append(str(data_path / value["rgb"]))
         additional_info["depth"].append(str(data_path / value["depth"]))
+
+        if size is not None:
+            if i >= (size - 1):
+                logger.info("Using first '{}' data samples".format(size))
+                break
 
     if not available_gt:
         transformations = [None] * len(rgb_images)
 
+    if pyr_down:
+        camera_model = RGBDCameraModel(camera_model.at(-1), camera_model.depth_scale)
+
     return transformations, rgb_images, depth_images, camera_model, additional_info
 
 
+def _load_config(path: Union[str, Path]):
+    path = Path(path).resolve()
+
+    if not path.exists():
+        raise FileNotFoundError("Could not find configuration file at '{}'".format(str(path)))
+
+    if not path.suffix == ".json":
+        raise ValueError("Expected config file to be '.json' got '{}' instead".format(path.suffix))
+
+    with path.open("r") as fp:
+        config = json.load(fp)
+
+    return config
+
+
 def main():
-    gt_transforms, rgb_images, depth_images, camera_model, additional_info = parse_arguments()
 
-    init_pose = gt_transforms[0] if gt_transforms[0] is not None else np.zeros((6, 1), dtype=np.float32)
+    dvo, gt_transforms, rgb_images, depth_images, additional_info = parse_arguments()
 
-    dvo = KerlDVO(camera_model=camera_model, initial_pose=init_pose, levels=3)
-
-    steps = []
+    transforms = []
+    poses = []
     errors = []
     for i, (rgb_image, depth_image, gt_transform) in enumerate(zip(rgb_images, depth_images, gt_transforms)):
 
         s = time()
-        dvo.step(rgb_image, depth_image)
+        transform = dvo.step(rgb_image, depth_image)
         e = time()
 
         # Error is only the euclidean distance (not taking rotation into account)
         if gt_transform is not None:
-            error = float(np.linalg.norm(dvo.current_pose[:3] - gt_transform[:3]))
+            t_error = float(np.linalg.norm(dvo.current_pose.tvec - gt_transform.tvec))
+            r_error = float(np.linalg.norm(dvo.current_pose.so3.log() - gt_transform.so3.log()))
+            logger.info("[Frame {} ({:.3f} s)] | Translational error: {:.4f} m | Rotational error: {:.4f}".format(
+                i + 1, e - s, t_error, r_error
+            ))
         else:
-            error = "N/A"
-        logger.info("[Frame {} ({:.3f} s)] Error: {} m".format(i + 1, e - s, error))
+            t_error = "N/A"
+            r_error = "N/A"
+            logger.info("[Frame {} ({:.3f} s)]".format(i + 1, e - s))
 
-        steps.append(dvo.current_pose.reshape(-1).tolist())
-        errors.append(error)
+        poses.append(dvo.current_pose.log().flatten().tolist())
+        transforms.append(transform.log().flatten().tolist())
+        errors.append(t_error)
 
     # Dump results
-    report = {"estimated_transformations": steps, "errors": errors}
+    report = {"estimated_poses": poses, "errors": errors, "estimated_transforms": transforms}
     report.update(additional_info)
 
     output_file = Path(__file__).resolve().parent.parent / "data" / "report.json"
 
     with output_file.open("w") as fp:
         json.dump(report, fp, indent=3)
+
+    # Create txt for comparing with TUM benchmarks
+    if report["type"] == "TUM":
+        with output_file.with_suffix(".txt").open("w") as fp:
+            fp.write("# timestamp tx ty tz qx qy qz qw\n")
+
+            for ts, transform in zip(additional_info["timestamps"], poses):
+                pose = Se3.from_se3(np.array(transform, dtype=np.float32).reshape(6, 1))
+                pose_txt = [str(ts)] + pose.tvec.flatten().tolist() + np.roll(pose.so3.quat, -1).flatten().tolist()
+                fp.write(" ".join((str(el) for el in pose_txt)))
+                fp.write("\n")
 
 
 if __name__ == "__main__":
