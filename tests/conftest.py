@@ -35,15 +35,15 @@ def load_test_benchmark():
     with (_TEST_DATADIR / "ground_truth.json").open("r") as fp:
         ground_truth_data = json.load(fp)
 
-    rgb_images = []
+    color_images = []
     depth_images = []
     ground_truth_transformations = []
     for value in ground_truth_data.values():
-        rgb_images.append(_load_grayscale_image(str(_TEST_DATADIR / value["rgb"])))
+        color_images.append(_load_bgr_image(str(_TEST_DATADIR / value["rgb"])))
         depth_images.append(_load_depth_image(str(_TEST_DATADIR / value["depth"])))
         ground_truth_transformations.append(np.array(value["transformation"]))
 
-    return rgb_images, depth_images, ground_truth_transformations
+    return color_images, depth_images, ground_truth_transformations
 
 
 @pytest.fixture
@@ -58,12 +58,12 @@ def load_single_benchmark_case(request):
     with (_TEST_DATADIR / "ground_truth.json").open("r") as fp:
         ground_truth_data = json.load(fp)
 
-    gray_images = []
+    color_images = []
     depth_images = []
     transformations = []
     for i in range(index, index + 2):
-        gray_images.append(_load_grayscale_image(str(_TEST_DATADIR / ground_truth_data[str(i)]["rgb"])))
+        color_images.append(_load_bgr_image(str(_TEST_DATADIR / ground_truth_data[str(i)]["rgb"])))
         depth_images.append(_load_depth_image(str(_TEST_DATADIR / ground_truth_data[str(i)]["depth"])))
         transformations.append(np.array(ground_truth_data[str(i)]["transformation"]))
 
-    return gray_images, depth_images, transformations
+    return color_images, depth_images, transformations

@@ -21,9 +21,9 @@ def compute_jacobian_of_warp_function(
 
     Notes
     -----
-    `J_w = J_pi * J_g * J_G` Where: `J_pi` is the 2x3 matrix of derivatives of the projection function with respect to
+    `J_w_i = J_pi * J_g * J_G` Where: `J_pi` is the 2x3 matrix of derivatives of the projection function with respect to
     points coordinates, `J_g` is the 3x12 Jacobian of the rigid body transformation with respect to its 12 parameters
-    and `J_G` is the 12x6 Jacobian matrix of the exponential map (Lie Algebra). So `J_w` is a 2x6 matrix
+    and `J_G` is the 12x6 Jacobian matrix of the exponential map (Lie Algebra). So `J_w` is a Nx2x6 matrix
     """
     fx = calibration_matrix[0, 0]
     fy = calibration_matrix[1, 1]

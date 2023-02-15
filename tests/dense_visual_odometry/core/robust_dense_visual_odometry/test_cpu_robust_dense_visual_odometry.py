@@ -1,8 +1,9 @@
 import pytest
 
 import numpy as np
+import cv2
 
-from dense_visual_odometry.core import KerlDVO
+from dense_visual_odometry.core import get_dvo
 from dense_visual_odometry.camera_model import RGBDCameraModel
 from dense_visual_odometry.utils.lie_algebra.special_euclidean_group import Se3, So3
 
@@ -24,14 +25,20 @@ class TestDVO:
         gray_image = np.full(shape=(height, width), fill_value=intensity_value, dtype=np.uint8)
         gray_image[:int(height / 2), :int(width / 2)] = intensity_value / 3.0
 
+        color_image = np.full(shape=(height, width, 3), fill_value=intensity_value, dtype=np.uint8)
+        color_image[:int(height / 2), :int(width / 2), :] = intensity_value / 3.0
+
         depth_image = np.ones_like(gray_image)
         depth_image[:int(height / 2), :int(width / 2)] = 3.0
 
         # When
-        dvo = KerlDVO(self.perfect_camera_model, Se3.identity(), 1)
-        dvo._init_gray_image_interpolator(gray_image)
-        dvo._init_gradients_interpolators(gray_image)
-        residuals, _ = dvo._compute_residuals(gray_image, gray_image, depth_image, estimate=Se3.identity())
+        dvo = get_dvo("robust-dvo", self.perfect_camera_model, Se3.identity(), **{"levels": 1})
+        dvo.step(color_image=color_image, depth_image=depth_image)
+        dvo._build_pyramids(
+            gray_image=gray_image,
+            depth_image=depth_image)
+        dvo._setup(level=0)
+        residuals, _, _ = dvo.compute_residuals_and_jacobian(estimate=Se3.identity(), level=0)
 
         # Then
         np.testing.assert_almost_equal(residuals, np.zeros_like(gray_image.reshape(-1, 1), dtype=np.float32))
@@ -42,24 +49,24 @@ class TestDVO:
     ):
 
         # Given
-        gray_images, depth_images, transformations = load_single_benchmark_case
+        color_images, depth_images, transformations = load_single_benchmark_case
         camera_model = RGBDCameraModel.load_from_yaml(load_camera_intrinsics_file)
 
         gt_transform = Se3(
             So3(transformations[1][:3, :3]), transformations[1][:3, 3].reshape(3, 1)
-            ).inverse() * Se3(
-                So3(transformations[0][:3, :3]), transformations[0][:3, 3].reshape(3, 1)
-            )
+        ).inverse() * Se3(
+            So3(transformations[0][:3, :3]), transformations[0][:3, 3].reshape(3, 1)
+        )
 
         # When
-        dvo = KerlDVO(camera_model, transformations[0], 1)
-        dvo._init_gray_image_interpolator(gray_images[1])
-        dvo._init_gradients_interpolators(gray_images[1])
-        residuals, _ = dvo._compute_residuals(gray_images[1], gray_images[0], depth_images[0], estimate=gt_transform)
-
-        mask = depth_images[0] != 0
-        res_img = np.zeros_like(gray_images[0], dtype=np.uint8)
-        res_img[mask] = residuals.reshape(-1).astype(np.uint8)
+        init_pose = Se3(So3(transformations[0][:3, :3]), transformations[0][:3, 3].reshape(3, 1))
+        dvo = get_dvo("robust-dvo", camera_model, init_pose, **{"levels": 1})
+        dvo.step(color_image=color_images[0], depth_image=depth_images[0])
+        dvo._build_pyramids(
+            gray_image=cv2.cvtColor(color_images[1], cv2.COLOR_BGR2GRAY),
+            depth_image=depth_images[1])
+        dvo._setup(level=0)
+        residuals, _, _ = dvo.compute_residuals_and_jacobian(estimate=gt_transform, level=0)
 
         # Then
         assert np.isclose(residuals.mean(), 0.0, atol=5.0)
