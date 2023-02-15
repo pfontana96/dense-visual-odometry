@@ -1,10 +1,10 @@
 from typing import Tuple
 import logging
+import math
 
 import numpy as np
 import numpy.typing as npt
 import numba as nb
-from scipy.interpolate import RegularGridInterpolator
 
 from dense_visual_odometry.core.robust_dense_visual_odometry.base_robust_dvo import BaseRobustDVO
 from dense_visual_odometry.camera_model import RGBDCameraModel
@@ -34,8 +34,6 @@ class RobustDVOCPU(BaseRobustDVO):
         self._curr_depth_image_pyr = None
         self._prev_depth_image_pyr = None
 
-        self._gray_image_interpolator = None
-
         if not self._approximate_image2_gradients:
             self._grady_interpolator = None
             self._gradx_interpolator = None
@@ -54,58 +52,33 @@ class RobustDVOCPU(BaseRobustDVO):
         self._curr_depth_image_pyr = ImagePyramid(self._levels, depth_image)
 
     def _setup(self, level: int):
-        height, width = self._prev_gray_image_pyr.at(level).shape
-
-        # Init interpolators
-        self._gray_image_interpolator = RegularGridInterpolator(
-            points=(np.arange(height, dtype=int), np.arange(width, dtype=int)),
-            values=self._curr_gray_image_pyr.at(level), method="linear", bounds_error=False
-        )
 
         if not self._approximate_image2_gradients:
 
-            gradx, grady = compute_gradients(image=self._curr_gray_image_pyr.at(level), kernel_size=3)
-
-            self._gradx_interpolator = RegularGridInterpolator(
-                points=(np.arange(height, dtype=int), np.arange(width, dtype=int)),
-                values=gradx, method="linear", bounds_error=False
-            )
-
-            self._grady_interpolator = RegularGridInterpolator(
-                points=(np.arange(height, dtype=int), np.arange(width, dtype=int)),
-                values=grady, method="linear", bounds_error=False
-            )
+            self._gradx, self._grady = compute_gradients(image=self._curr_gray_image_pyr.at(level), kernel_size=3)
 
         else:
             # Directly compute Jacobian once using prev frame
 
             pointcloud, mask = self._camera_model.deproject(
-                self._prev_depth_image_pyr.at(level), level=-level, return_mask=True
+                self._prev_depth_image_pyr.at(level), level=level, return_mask=True
             )
             J_w = compute_jacobian_of_warp_function(
-                pointcloud=pointcloud, calibration_matrix=self._camera_model.at(-level)
+                pointcloud=pointcloud, calibration_matrix=self._camera_model.at(level)
             )
 
             gradx, grady = compute_gradients(image=self._prev_gray_image_pyr.at(level), kernel_size=3)
 
-            # gradx_values = gradx[mask].reshape(-1, 1)
-            # grady_values = grady[mask].reshape(-1, 1)
-
-            # self._jacobian = np.empty((gradx_values.size, 6), dtype=np.float32)
-            # for i, gradients in enumerate(np.hstack((gradx_values, grady_values))):
-            #     self._jacobian[i] = np.dot(gradients.reshape(1, 2), J_w[i])
             gradx_values = gradx[mask].reshape(-1, 1)
             grady_values = grady[mask].reshape(-1, 1)
 
             gradients = np.ascontiguousarray(np.hstack((gradx_values, grady_values)))
 
-            self._jacobian = self._compute_jacobian_approximate_image2_gradient(
-                np.ascontiguousarray(J_w), gradients
-            )
+            self._jacobian = self._fill_jacobian(np.ascontiguousarray(J_w), gradients)
 
     @staticmethod
     @nb.njit("float32[:,:](float32[:,:,:], float32[:,:])", parallel=True, fastmath=True)
-    def _compute_jacobian_approximate_image2_gradient(
+    def _fill_jacobian(
         Jw: npt.NDArray[np.float32], gradients: npt.NDArray[np.uint8]
     ) -> npt.NDArray[np.float32]:
 
@@ -117,11 +90,10 @@ class RobustDVOCPU(BaseRobustDVO):
         return jacobian
 
     def _cleanup(self):
-        self._gray_image_interpolator = None
 
         if not self._approximate_image2_gradients:
-            self._grady_interpolator = None
-            self._gradx_interpolator = None
+            self._grady = None
+            self._gradx = None
 
         else:
             self._jacobian = None
@@ -148,16 +120,14 @@ class RobustDVOCPU(BaseRobustDVO):
             NX6 array containing the jacobian of `image` with respect to the six parameters of the estimated camera
             motion.
         """
-        gradx_values = self._gradx_interpolator(
-            np.roll(warped_pixels[:2, :].T, 1, axis=1)
-        ).astype(np.float32).reshape(-1, 1)
-        grady_values = self._grady_interpolator(
-            np.roll(warped_pixels[:2, :].T, 1, axis=1)
-        ).astype(np.float32).reshape(-1, 1)
+        gradx_values = self.interpolate_bilinear(
+            image=self._gradx, pixels_coordinates=warped_pixels.T
+        )
+        grady_values = self.interpolate_bilinear(
+            image=self._grady, pixels_coordinates=warped_pixels.T
+        )
 
-        J = np.zeros((gradx_values.size, 6), dtype=np.float32)
-        for i, gradients in enumerate(np.hstack((gradx_values, grady_values))):
-            J[i] = np.dot(gradients.reshape(1, 2), J_w[i])
+        J = self._fill_jacobian(Jw=J_w, gradients=np.ascontiguousarray(np.hstack((gradx_values, grady_values))))
 
         return J
 
@@ -204,20 +174,22 @@ class RobustDVOCPU(BaseRobustDVO):
 
         # Warp I1 pixels
         warped_pixels = self._camera_model.project(pointcloud, level=level)
-        warped_pixels_intensities = self._gray_image_interpolator(
-            np.roll(warped_pixels[:2, :].T, 1, axis=1)
-        ).astype(np.float32)
+        warped_pixels_intensities = self.interpolate_bilinear(
+            image=self._curr_gray_image_pyr.at(level), pixels_coordinates=warped_pixels[:2, :].T
+        )
         valid_warped_pixels_mask = ~np.isnan(warped_pixels_intensities).flatten()
 
         if not self._approximate_image2_gradients:
-            jacobian = self._compute_jacobian(J_w, warped_pixels[:, valid_warped_pixels_mask])
+            jacobian = self._compute_jacobian(
+                J_w[valid_warped_pixels_mask, ...], warped_pixels[:2, valid_warped_pixels_mask]
+            )
 
         else:
             jacobian = jacobian[valid_warped_pixels_mask]
 
         # Interpolate intensity values on I2 for warped pixels projected coordinates
         residuals = (
-            warped_pixels_intensities[valid_warped_pixels_mask] -
+            warped_pixels_intensities[valid_warped_pixels_mask].flatten() -
             self._prev_gray_image_pyr.at(level)[mask][valid_warped_pixels_mask]
         ).reshape(-1, 1)
 
@@ -226,3 +198,57 @@ class RobustDVOCPU(BaseRobustDVO):
         ))
 
         return residuals, jacobian, mask
+
+    @staticmethod
+    @nb.njit(
+        ['float32[:,:](uint8[:,:], float32[:,:])', 'float32[:,:](float32[:,:], float32[:,:])'],
+        parallel=True, fastmath=True
+    )
+    def interpolate_bilinear(
+        image: npt.NDArray[np.uint8], pixels_coordinates: npt.NDArray[np.float32]
+    ) -> npt.NDArray[np.float32]:
+        """Interpolates linearly values for pixels in 2d images.
+
+        Parameters
+        ----------
+        image : npt.NDArray[np.uint8]
+            Image with source values to interpolate from.
+        pixels_coordinates : npt.NDArray[np.float32]
+            Nx2 array containing coordinates for which we want the interpolated values of `image`
+
+        Returns
+        -------
+        npt.NDArray[np.float32]
+            Nx1 Containing interpolated values for `pixels_coordinates`. If a coordinates lies out of `image` bounds
+            then it is fill with `np.nan`
+        """
+
+        N = pixels_coordinates.shape[0]
+        height, width = image.shape
+
+        interpolated_values = np.empty((N, 1), dtype=np.float32)
+
+        for i in nb.prange(N):
+
+            x, y = pixels_coordinates[i]
+
+            x0 = int(math.floor(x))
+            y0 = int(math.floor(y))
+            x1 = x0 + 1
+            y1 = y0 + 1
+
+            # Avoid pixels outside sensor grid
+            if (x0 < 0) or (y0 < 0) or (x1 >= width) or (y1 >= height):
+                interpolated_values[i, 0] = np.nan
+
+            w00 = (x1 - x) * (y1 - y)
+            w01 = (x1 - x) * (y - y0)
+            w10 = (x - x0) * (y1 - y)
+            w11 = (x - x0) * (y - y0)
+
+            interpolated_values[i, 0] = (
+                (w00 * image[y0, x0] + w01 * image[y1, x0] + w10 * image[y0, x1] + w11 * image[y1, x1]) /
+                ((x1 - x0) * (y1 - y0))
+            )
+
+        return interpolated_values

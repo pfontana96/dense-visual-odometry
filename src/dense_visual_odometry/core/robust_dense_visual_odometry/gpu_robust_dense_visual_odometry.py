@@ -104,7 +104,7 @@ class RobustDVOGPU(BaseRobustDVO):
         self._R_uvm.get("cpu")[...] = T[:3, :3]
         self._tvec_uvm.get("cpu")[...] = T[:3, 3]
 
-        intrinsics = self._camera_model.at(-level)
+        intrinsics = self._camera_model.at(level)
 
         residuals_kernel[grid_dim, self._block_dim](
             self._curr_gray_image_pyr.at(level, "gpu"), self._prev_gray_image_pyr.at(level, "gpu"),

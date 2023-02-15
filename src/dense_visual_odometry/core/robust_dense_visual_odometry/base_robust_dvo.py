@@ -5,6 +5,7 @@ from typing import Tuple
 import numpy as np
 import numpy.typing as npt
 import numba as nb
+from scipy.linalg import lstsq
 
 from dense_visual_odometry.utils.lie_algebra import Se3
 from dense_visual_odometry.camera_model import RGBDCameraModel
@@ -192,10 +193,10 @@ class BaseRobustDVO(BaseDenseVisualOdometry, abc.ABC):
 
                     err += 0.5 * self._sigma * np.linalg.norm(old.log())
 
-                # inc_xi, _, _, _ = lstsq(
-                #     a=H, b=b, lapack_driver="gelsy", overwrite_a=True, overwrite_b=True, check_finite=False
-                # )
-                inc_xi = nb_lstsq(a=H, b=b)
+                inc_xi, _, _, _ = lstsq(
+                    a=H, b=b, lapack_driver="gelsy", overwrite_a=True, overwrite_b=True, check_finite=False
+                )
+                # inc_xi = nb_lstsq(a=H, b=b)
 
                 inc = Se3.from_se3(inc_xi)
 
